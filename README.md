@@ -32,6 +32,32 @@ The coordinator, workers, and reviewer default to
 `openai/gpt-5.6-luna#high`. Their Markdown definitions can be changed
 independently.
 
+## Using the factory
+
+1. Start `opencode` and describe what you want: `Add team invitations`.
+2. Let the coordinator check for a spec. If one is missing, use
+   `/grill-with-docs` for work you can plan in one session or `/wayfinder` for a
+   large effort with unresolved decisions.
+3. Approve the resulting spec and implementation-ticket breakdown. The
+   coordinator publishes them as GitHub Issues and dispatches ready,
+   non-overlapping tickets to at most two workers.
+4. Keep planning or queueing features while workers run. Ask
+   `/factory-status` at any time to see ready, running, blocked, human-input,
+   and review work.
+5. Answer issues in the human queue when the factory needs a decision or
+   privileged action.
+6. Review and merge completed PRs yourself. Agents can open PRs but never merge
+   them.
+
+Useful prompts:
+
+```text
+Plan this feature before building it: <idea>
+Queue the approved spec in issue #12
+What needs my input?
+Show factory status
+```
+
 ## Core flow
 
 ```text

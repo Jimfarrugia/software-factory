@@ -22,8 +22,11 @@ without cutting safety.
 2. Install OpenCode V2, GitHub CLI (`gh`), Git, Bash, and `jq`.
 3. Authenticate: `gh auth login` and configure your OpenAI provider in OpenCode.
 4. Run `scripts/factory-setup` to create the label vocabulary.
-5. Start `opencode` in the repository. The `factory` agent is selected by default.
-6. Describe a feature, invoke `/factory-intake`, or ask for `/factory-status`.
+5. Protect the default branch as described in `docs/factory/security.md`. Solo
+   owners using one GitHub identity must allow self-merge by requiring zero
+   approvals; installations with a separate worker bot should require one.
+6. Start `opencode` in the repository. The `factory` agent is selected by default.
+7. Describe a feature, invoke `/factory-intake`, or ask for `/factory-status`.
 
 The coordinator, workers, and reviewer default to
 `openai/gpt-5.6-luna#high`. Their Markdown definitions can be changed

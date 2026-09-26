@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  echo "usage: $0 <issue-number> <worktree> <prompt-file>" >&2
+  exit 2
+}
+
+[[ $# -eq 3 ]] || usage
+
+issue=$1
+worktree=$2
+prompt_file=$3
+
+[[ $issue =~ ^[1-9][0-9]*$ ]] || { echo "error: issue number must be a positive integer" >&2; exit 1; }
+[[ -d $worktree ]] || { echo "error: worktree does not exist: $worktree" >&2; exit 1; }
+[[ -f $prompt_file ]] || { echo "error: prompt file does not exist: $prompt_file" >&2; exit 1; }
+
+command -v jq >/dev/null || { echo "error: jq is required" >&2; exit 1; }
+command -v opencode >/dev/null || { echo "error: opencode is required" >&2; exit 1; }
+
+worktree=$(cd "$worktree" && pwd -P)
+top_level=$(git -C "$worktree" rev-parse --show-toplevel)
+[[ $top_level == "$worktree" ]] || { echo "error: path is not a Git worktree root: $worktree" >&2; exit 1; }
+
+branch=$(git -C "$worktree" branch --show-current)
+[[ $branch == factory/"$issue"-* ]] || {
+  echo "error: expected branch factory/$issue-*, found: $branch" >&2
+  exit 1
+}
+
+create_payload=$(jq -n \
+  --arg title "Factory worker for issue #$issue" \
+  --arg directory "$worktree" \
+  --argjson issue "$issue" \
+  '{
+    title: $title,
+    agent: "worker",
+    model: {providerID: "openai", id: "gpt-5.6-luna", variant: "high"},
+    location: {directory: $directory},
+    metadata: {factoryIssue: $issue}
+  }')
+
+session_response=$(opencode api post /api/session --data "$create_payload")
+session_id=$(jq -er '.data.id' <<<"$session_response")
+session_location=$(jq -er '.data.location.directory' <<<"$session_response")
+[[ $session_location == "$worktree" ]] || {
+  echo "error: OpenCode bound session to $session_location instead of $worktree" >&2
+  exit 1
+}
+
+state_dir=.factory/sessions
+mkdir -p "$state_dir"
+log_file="$state_dir/$session_id.log"
+state_file="$state_dir/$session_id.json"
+prompt_payload=$(jq -Rs '{text: ., resume: true}' < "$prompt_file")
+
+nohup opencode api post "/api/session/$session_id/prompt" --data "$prompt_payload" >"$log_file" 2>&1 &
+worker_pid=$!
+
+jq -n \
+  --arg sessionID "$session_id" \
+  --arg issue "$issue" \
+  --arg branch "$branch" \
+  --arg worktree "$worktree" \
+  --arg log "$log_file" \
+  --argjson pid "$worker_pid" \
+  '{sessionID: $sessionID, issue: ($issue | tonumber), branch: $branch, worktree: $worktree, pid: $pid, log: $log}' \
+  | tee "$state_file"

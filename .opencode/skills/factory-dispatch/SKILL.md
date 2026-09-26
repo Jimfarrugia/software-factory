@@ -32,17 +32,23 @@ The coordinator performs these writes in order:
 1. Remove `factory:ready`, add `factory:running`.
 2. Create branch `factory/<issue>-<slug>` from the current default branch.
 3. Create a sibling worktree under `../<repo>-worktrees/<issue>-<slug>`.
-4. Post a machine-readable claim comment:
+4. Write the complete worker packet to a temporary prompt file outside the
+   repository, then run
+   `scripts/factory-start-worker <issue> <worktree> <prompt-file>`. This creates
+   a `worker` session with the worktree as its explicit OpenCode `location`,
+   verifies that binding, and starts its prompt asynchronously.
+5. Post a machine-readable claim comment using the returned session ID:
 
    `<!-- factory-claim issue=<n> session=<id> branch=<branch> worktree=<absolute-path> claimed-at=<ISO-8601> -->`
 
-5. Launch the `worker` subagent in the background. Its packet must contain the
+6. Its packet must contain the
    issue and parent URLs, full acceptance criteria, decisions, absolute
    worktree, branch, allowed scope, required checks, and PR wording.
 
-The worker must confirm its location before editing. If OpenCode cannot bind or
-move the child session to the worktree reliably, stop: do not run concurrent
-writers. A prompt to `cd` is not proof of isolation.
+The worker must also confirm its location before editing. Do not replace the
+explicit session location with a prompt to `cd`; that is not isolation. Session
+state and logs under `.factory/sessions/` are disposable observations, not the
+durable queue.
 
 ## Completion
 

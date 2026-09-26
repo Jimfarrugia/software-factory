@@ -58,7 +58,10 @@ Only an open `factory:type:implementation` issue in `factory:ready` can enter
 the worker frontier. Its parent must have `factory:spec-approved`, every blocker
 must be closed, and no human decision may remain. The coordinator claims work,
 creates `factory/<issue>-<slug>` and a sibling worktree, posts the claim, then
-launches one worker in that location.
+launches one worker in that location. `scripts/factory-start-worker` creates the
+OpenCode session with an explicit location, verifies the returned location, and
+submits the packet asynchronously. This mechanism was verified against
+OpenCode V2.0.15; re-run an isolation spike after an OpenCode API upgrade.
 
 Concurrency defaults to two, but dependency, migration, schema, API, and likely
 file overlap override that limit. One writer owns one worktree. If child-session

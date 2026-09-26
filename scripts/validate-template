@@ -16,6 +16,7 @@ required=(
   .opencode/skills/factory-plan/SKILL.md
   .opencode/skills/factory-dispatch/SKILL.md
   .opencode/skills/factory-status/SKILL.md
+  scripts/factory-start-worker
   docs/agents/issue-tracker.md
   docs/factory/workflow.md
 )
@@ -51,6 +52,6 @@ grep -q '^model: openai/gpt-5.6-luna#high$' .opencode/agents/worker.md
 grep -q '^model: openai/gpt-5.6-luna#high$' .opencode/agents/reviewer.md
 
 git diff --check
-shellcheck scripts/factory-setup scripts/factory-status scripts/validate-template
+shellcheck scripts/factory-setup scripts/factory-start-worker scripts/factory-status scripts/validate-template
 
 echo "Template validation passed."

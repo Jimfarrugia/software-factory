@@ -19,7 +19,7 @@ without cutting safety.
 ## Start a product repository
 
 1. Create a repository from this GitHub template and clone it.
-2. Install OpenCode V2, GitHub CLI (`gh`), Git, and Bash.
+2. Install OpenCode V2, GitHub CLI (`gh`), Git, Bash, and `jq`.
 3. Authenticate: `gh auth login` and configure your OpenAI provider in OpenCode.
 4. Run `scripts/factory-setup` to create the label vocabulary.
 5. Start `opencode` in the repository. The `factory` agent is selected by default.
@@ -45,6 +45,8 @@ the required GitHub protections.
 ```sh
 scripts/validate-template
 ```
+
+Development validation also requires `shellcheck`.
 
 Upstream sources and commits are recorded in `upstream-lock.json`. Vendored
 licenses remain beside their sources.

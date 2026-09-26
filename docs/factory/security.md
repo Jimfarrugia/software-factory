@@ -16,8 +16,8 @@ Protect the default branch:
 Choose the review requirement to match the GitHub identity model:
 
 - **Solo owner, shared identity:** require zero approvals so the owner can merge
-  a PR authored through their own token. The owner still reviews and performs
-  the merge; agents remain prohibited from merging.
+  a PR authored through their own token. The coordinator may merge only after
+  protected checks and independent review pass.
 - **Separate worker/bot identity:** require at least one human approval. This is
   the stronger production setup because GitHub enforces the human boundary.
 
@@ -32,7 +32,8 @@ bodies, prompts, claim comments, branches, or committed configuration.
 
 Workers cannot create subagents, merge PRs, force push, hard-reset, clean
 untracked files, or push the conventional default branch names. Reviewers are
-read-only. The coordinator is the sole queue claimant and never merges.
+read-only. The coordinator is the sole queue claimant and the only agent allowed
+to merge. Branch protection must reject merges before required checks pass.
 
 Shell command matching is defense in depth and cannot prevent every equivalent
 command. GitHub rulesets and token permissions are the enforcement boundary.

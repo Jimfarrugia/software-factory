@@ -16,4 +16,4 @@ Parent feature: #<!-- feature issue -->
 
 ## Risks and follow-up
 
-<!-- State remaining risks or write None. Agents must not merge this PR. -->
+<!-- State remaining risks or write None. Only the coordinator may merge, after every checklist item and required check passes, independent review has no blocking findings, all conversations are resolved, and GitHub reports this non-draft PR mergeable. -->

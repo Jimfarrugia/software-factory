@@ -13,7 +13,8 @@ without cutting safety.
   through `wayfinder`.
 - Stores specs, decisions, dependencies, and queue state in GitHub Issues.
 - Dispatches at most two implementation workers into separate Git worktrees.
-- Opens pull requests for human review and never merges them.
+- Independently reviews pull requests and lets the coordinator merge them only
+  after required checks pass.
 - Surfaces decisions and blocked work in a human queue.
 
 ## Start a product repository
@@ -46,8 +47,10 @@ independently.
    and review work.
 5. Answer issues in the human queue when the factory needs a decision or
    privileged action.
-6. Review and merge completed PRs yourself. Agents can open PRs but never merge
-   them.
+6. The coordinator reviews completed PRs and may merge them after required
+   checks pass, acceptance criteria are met, and no blocking findings, human
+   decisions, or conversations remain. The PR must also be non-draft and
+   mergeable. You can still review or merge any PR yourself.
 
 Useful prompts:
 

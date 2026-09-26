@@ -36,7 +36,7 @@ assert len(lock["sources"]) == 2
 PY
 
 aggregate_hash() {
-  find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1
+  LC_ALL=C find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1
 }
 
 expected_matt=$(python -c 'import json; print(json.load(open("upstream-lock.json"))["sources"][0]["aggregateSha256"])')

@@ -6,7 +6,7 @@
       "repository": "https://github.com/mattpocock/skills.git",
       "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
       "license": "MIT",
-      "aggregateSha256": "8eabb7630a097570c57c2b162b5f0d63beebb41172b2fb510d0238799cddc785",
+      "aggregateSha256": "ed81246a5854a3a5b5ae74937e12623225297dbd4028033714741dd1452cfe21",
       "paths": [
         "skills/setup-matt-pocock-skills",
         "skills/grilling",

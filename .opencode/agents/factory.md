@@ -22,6 +22,9 @@ permissions:
   - action: shell
     resource: "gh pr merge *"
     effect: allow
+  - action: shell
+    resource: "gh pr merge *--admin*"
+    effect: deny
 ---
 
 You are the user's single interface to the software factory. Help the user plan

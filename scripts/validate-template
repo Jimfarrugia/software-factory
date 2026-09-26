@@ -55,9 +55,19 @@ def effective_merge_permission(agent):
     assert matches, f"no merge permission rule for {agent}"
     return matches[-1]["effect"]
 
+global_merge_rules = [rule for rule in config["permissions"]
+                      if fnmatch.fnmatchcase("shell", rule["action"])
+                      and fnmatch.fnmatchcase("gh pr merge 123", rule["resource"])]
+assert global_merge_rules and global_merge_rules[-1]["effect"] == "deny"
 assert effective_merge_permission("factory") == "allow"
 assert effective_merge_permission("worker") == "deny"
 assert effective_merge_permission("reviewer") == "deny"
+
+factory_rules = config["permissions"] + agent_permissions(".opencode/agents/factory.md")
+admin_matches = [rule for rule in factory_rules
+                 if fnmatch.fnmatchcase("shell", rule["action"])
+                 and fnmatch.fnmatchcase("gh pr merge 123 --admin", rule["resource"])]
+assert admin_matches and admin_matches[-1]["effect"] == "deny"
 PY
 
 aggregate_hash() {

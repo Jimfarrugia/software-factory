@@ -50,6 +50,9 @@ actual_ponytail=$(cd vendor/ponytail && aggregate_hash)
 grep -q '^model: openai/gpt-5.6-luna#high$' .opencode/agents/factory.md
 grep -q '^model: openai/gpt-5.6-luna#high$' .opencode/agents/worker.md
 grep -q '^model: openai/gpt-5.6-luna#high$' .opencode/agents/reviewer.md
+grep -A1 'resource: "gh pr merge \*"' .opencode/agents/factory.md | grep -q 'effect: allow'
+grep -A1 'resource: "gh pr merge \*"' .opencode/agents/worker.md | grep -q 'effect: deny'
+grep -A1 'resource: "gh pr merge \*"' .opencode/agents/reviewer.md | grep -q 'effect: deny'
 
 git diff --check
 shellcheck scripts/factory-setup scripts/factory-start-worker scripts/factory-status scripts/validate-template

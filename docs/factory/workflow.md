@@ -79,5 +79,9 @@ At startup and before dispatch:
   blocked or safely return it to ready;
 - stale worktree with changes: report it; never delete or reset automatically.
 
-The human merges. A merged PR may close its linked implementation issue, but
-never silently closes the parent feature until all acceptance criteria are met.
+The coordinator may merge a non-draft PR after every required check passes, its
+independent review has no blocking findings, acceptance criteria are met, no
+human decision or conversation remains unresolved, and GitHub reports the PR
+mergeable. Workers and reviewers never merge. A merged PR may close its linked
+implementation issue, but never silently closes the parent feature until all
+feature acceptance criteria are met.

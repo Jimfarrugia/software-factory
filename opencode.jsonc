@@ -4,7 +4,6 @@
   "default_agent": "factory",
   "skills": ["./vendor/matt-pocock-skills/skills"],
   "permissions": [
-    { "action": "shell", "resource": "gh pr merge *", "effect": "deny" },
     { "action": "shell", "resource": "git push *--force*", "effect": "deny" },
     { "action": "shell", "resource": "git push * main*", "effect": "deny" },
     { "action": "shell", "resource": "git push * master*", "effect": "deny" }

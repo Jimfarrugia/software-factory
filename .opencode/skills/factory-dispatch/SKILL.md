@@ -53,5 +53,9 @@ durable queue.
 ## Completion
 
 After a worker opens a PR, replace `factory:running` with `factory:review` and
-launch `reviewer`. Never merge. On failure, preserve the branch and worktree,
-post the blocker, and use `factory:blocked` or `factory:human` as appropriate.
+launch `reviewer`. The coordinator may merge only after all required checks pass,
+the independent review has no blocking findings, acceptance criteria are met,
+the PR is mergeable and not a draft, and no human decision or conversation is
+unresolved. Workers and reviewers never merge. On failure, preserve the branch
+and worktree, post the blocker, and use `factory:blocked` or `factory:human` as
+appropriate.

@@ -16,4 +16,4 @@ Parent feature: #<!-- feature issue -->
 
 ## Risks and follow-up
 
-<!-- State remaining risks or write None. Agents must not merge this PR. -->
+<!-- State remaining risks or write None. Only the coordinator may merge, after required checks and independent review pass. -->

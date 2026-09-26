@@ -1,0 +1,51 @@
+---
+name: Factory Dispatch
+description: Claim ready GitHub implementation tickets and launch at most two isolated OpenCode workers safely
+---
+
+# Factory dispatch
+
+## Reconcile first
+
+Run `scripts/factory-status`. For each `factory:running` issue, check its latest
+`<!-- factory-claim ... -->` comment, branch, worktree, child session, and PR.
+Move an issue with an open PR to `factory:review`. Return an abandoned claim to
+`factory:ready` only after preserving and reporting any uncommitted work.
+
+## Select the frontier
+
+An issue is dispatchable only when all are true:
+
+- open and labelled `factory:type:implementation` and `factory:ready`;
+- linked to a parent feature labelled `factory:spec-approved`;
+- all blocking issues are closed;
+- no unresolved human decision remains;
+- it does not overlap a running worker's likely files, schema, migration, or API.
+
+Never dispatch a `factory:type:decision`, `wayfinder:map`, or
+`wayfinder:*` issue. Keep no more than two writing workers active.
+
+## Claim and isolate
+
+The coordinator performs these writes in order:
+
+1. Remove `factory:ready`, add `factory:running`.
+2. Create branch `factory/<issue>-<slug>` from the current default branch.
+3. Create a sibling worktree under `../<repo>-worktrees/<issue>-<slug>`.
+4. Post a machine-readable claim comment:
+
+   `<!-- factory-claim issue=<n> session=<id> branch=<branch> worktree=<absolute-path> claimed-at=<ISO-8601> -->`
+
+5. Launch the `worker` subagent in the background. Its packet must contain the
+   issue and parent URLs, full acceptance criteria, decisions, absolute
+   worktree, branch, allowed scope, required checks, and PR wording.
+
+The worker must confirm its location before editing. If OpenCode cannot bind or
+move the child session to the worktree reliably, stop: do not run concurrent
+writers. A prompt to `cd` is not proof of isolation.
+
+## Completion
+
+After a worker opens a PR, replace `factory:running` with `factory:review` and
+launch `reviewer`. Never merge. On failure, preserve the branch and worktree,
+post the blocker, and use `factory:blocked` or `factory:human` as appropriate.

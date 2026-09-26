@@ -1,0 +1,33 @@
+name: Human or Wayfinder decision
+description: Resolve one question that blocks planning or implementation
+title: "[Decision]: "
+labels:
+  - "factory:type:decision"
+  - "factory:human"
+body:
+  - type: input
+    id: parent
+    attributes:
+      label: Parent feature or map
+      placeholder: "#12"
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: State the single decision or investigation this ticket resolves.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Why it matters
+      description: Explain what remains blocked and the constraints on the answer.
+    validations:
+      required: true
+  - type: textarea
+    id: resolution
+    attributes:
+      label: Resolution record
+      description: Complete this before closing; link supporting research or prototypes.

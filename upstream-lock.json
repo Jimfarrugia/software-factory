@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "name": "mattpocock/skills",
+      "repository": "https://github.com/mattpocock/skills.git",
+      "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+      "license": "MIT",
+      "aggregateSha256": "8eabb7630a097570c57c2b162b5f0d63beebb41172b2fb510d0238799cddc785",
+      "paths": [
+        "skills/setup-matt-pocock-skills",
+        "skills/grilling",
+        "skills/grill-with-docs",
+        "skills/domain-modeling",
+        "skills/wayfinder",
+        "skills/research",
+        "skills/prototype",
+        "skills/to-spec",
+        "skills/to-tickets",
+        "skills/implement",
+        "skills/tdd",
+        "skills/code-review",
+        "skills/diagnosing-bugs",
+        "skills/handoff"
+      ]
+    },
+    {
+      "name": "DietrichGebert/ponytail",
+      "repository": "https://github.com/DietrichGebert/ponytail.git",
+      "commit": "e3ba2aa6f1e6f0bc4d69eb09c9f0d0a93af56156",
+      "license": "MIT",
+      "aggregateSha256": "e0ed5a2b2990ae01c59d139d3c993863d8fb14fe3036d19c0d9079da0871c073",
+      "paths": ["AGENTS.md", "LICENSE"]
+    }
+  ]
+}

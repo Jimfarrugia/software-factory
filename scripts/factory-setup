@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+command -v gh >/dev/null || { echo "error: gh is required" >&2; exit 1; }
+gh auth status >/dev/null
+gh repo view --json nameWithOwner --jq '"Configuring factory labels in " + .nameWithOwner'
+
+create_label() {
+  gh label create "$1" --color "$2" --description "$3" --force
+}
+
+create_label "factory:type:feature" "5319E7" "Parent feature and canonical specification"
+create_label "factory:type:implementation" "1D76DB" "One verifiable implementation slice"
+create_label "factory:type:decision" "D4C5F9" "One planning or product decision"
+create_label "factory:needs-triage" "FBCA04" "Needs coordinator or maintainer classification"
+create_label "factory:needs-spec" "E99695" "Needs a sufficient approved specification"
+create_label "factory:ready" "0E8A16" "Ready for an implementation agent"
+create_label "factory:human" "D93F0B" "Waiting for human decision or action"
+create_label "factory:running" "0052CC" "Claimed by an active worker"
+create_label "factory:blocked" "B60205" "Blocked by a dependency or external condition"
+create_label "factory:review" "006B75" "Pull request awaits human review"
+create_label "factory:wontfix" "FFFFFF" "Intentionally not actioned"
+create_label "factory:spec-approved" "0E8A16" "Feature specification approved for ticketing"
+create_label "wayfinder:map" "7057FF" "Wayfinder decision map"
+create_label "wayfinder:research" "C5DEF5" "AFK research decision ticket"
+create_label "wayfinder:prototype" "BFDADC" "HITL prototype decision ticket"
+create_label "wayfinder:grilling" "F9D0C4" "HITL grilling decision ticket"
+create_label "wayfinder:task" "FEF2C0" "Manual work that unblocks a decision"
+
+echo "Factory labels are ready. Configure the default-branch rules in docs/factory/security.md after the first push."

@@ -1,0 +1,47 @@
+name: Feature specification
+description: Plan a feature and hold its canonical approved specification
+title: "[Feature]: "
+labels:
+  - "factory:type:feature"
+  - "factory:needs-spec"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Implementation will not be dispatched until this feature has a sufficient spec and the `factory:spec-approved` label.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and outcome
+      description: What problem exists, for whom, and what observable outcome is wanted?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and non-goals
+      description: What is included and explicitly excluded?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List externally observable criteria, one checklist item per line.
+      value: "- [ ] "
+    validations:
+      required: true
+  - type: textarea
+    id: decisions
+    attributes:
+      label: Decisions and constraints
+      description: Record resolved choices, constraints, and links to open decision tickets.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation expectations
+      description: Which user flows, tests, checks, or operational evidence prove this works?
+    validations:
+      required: true

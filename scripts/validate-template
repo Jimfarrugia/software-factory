@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+required=(
+  AGENTS.md
+  README.md
+  opencode.jsonc
+  upstream-lock.json
+  .opencode/agents/factory.md
+  .opencode/agents/worker.md
+  .opencode/agents/reviewer.md
+  .opencode/skills/factory-intake/SKILL.md
+  .opencode/skills/factory-plan/SKILL.md
+  .opencode/skills/factory-dispatch/SKILL.md
+  .opencode/skills/factory-status/SKILL.md
+  docs/agents/issue-tracker.md
+  docs/factory/workflow.md
+)
+
+for path in "${required[@]}"; do
+  [[ -f $path ]] || { echo "error: missing $path" >&2; exit 1; }
+done
+
+python - <<'PY'
+import json
+from pathlib import Path
+
+json.loads(Path("opencode.jsonc").read_text())
+lock = json.loads(Path("upstream-lock.json").read_text())
+assert lock["schemaVersion"] == 1
+assert len(lock["sources"]) == 2
+PY
+
+aggregate_hash() {
+  find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1
+}
+
+expected_matt=$(python -c 'import json; print(json.load(open("upstream-lock.json"))["sources"][0]["aggregateSha256"])')
+actual_matt=$(cd vendor/matt-pocock-skills && aggregate_hash)
+[[ $actual_matt == "$expected_matt" ]] || { echo "error: Matt Pocock vendor hash differs from upstream-lock.json" >&2; exit 1; }
+
+expected_ponytail=$(python -c 'import json; print(json.load(open("upstream-lock.json"))["sources"][1]["aggregateSha256"])')
+actual_ponytail=$(cd vendor/ponytail && aggregate_hash)
+[[ $actual_ponytail == "$expected_ponytail" ]] || { echo "error: Ponytail vendor hash differs from upstream-lock.json" >&2; exit 1; }
+
+grep -q '^model: openai/gpt-5.6-luna#high$' .opencode/agents/factory.md
+grep -q '^model: openai/gpt-5.6-luna#high$' .opencode/agents/worker.md
+grep -q '^model: openai/gpt-5.6-luna#high$' .opencode/agents/reviewer.md
+
+git diff --check
+shellcheck scripts/factory-setup scripts/factory-status scripts/validate-template
+
+echo "Template validation passed."

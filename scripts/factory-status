@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+command -v gh >/dev/null || { echo "error: gh is required" >&2; exit 1; }
+gh auth status >/dev/null
+
+print_state() {
+  local heading=$1
+  local label=$2
+  echo "## $heading"
+  local output
+  output=$(gh issue list --state open --label "$label" --limit 100 \
+    --json number,title,url,labels,assignees \
+    --jq '.[] | "- [#\(.number) \(.title)](\(.url)) — labels: \([.labels[].name] | join(", ")); assignees: \(if (.assignees | length) == 0 then "none" else [.assignees[].login] | join(", ") end)"')
+  if [[ -n $output ]]; then
+    echo "$output"
+  else
+    echo "- None"
+  fi
+  echo
+}
+
+repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+echo "# Factory status — $repo"
+echo
+print_state "Ready frontier candidates" "factory:ready"
+print_state "Running" "factory:running"
+print_state "Human queue" "factory:human"
+print_state "Review" "factory:review"
+print_state "Blocked" "factory:blocked"
+
+echo "This is a queue snapshot. The coordinator must still verify parent specs, blockers, claims, worktrees, sessions, and PRs."

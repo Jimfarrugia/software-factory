@@ -1,0 +1,44 @@
+name: Implementation ticket
+description: One approved, independently verifiable vertical slice
+title: "[Implementation]: "
+labels:
+  - "factory:type:implementation"
+  - "factory:needs-triage"
+body:
+  - type: input
+    id: parent
+    attributes:
+      label: Parent feature
+      description: Link the approved feature issue, for example #12.
+      placeholder: "#12"
+    validations:
+      required: true
+  - type: textarea
+    id: build
+    attributes:
+      label: What to build
+      description: Describe the complete user-visible vertical slice, not layer-by-layer edits.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      value: "- [ ] "
+    validations:
+      required: true
+  - type: input
+    id: blockers
+    attributes:
+      label: Blocked by
+      description: List blocking issues or write None.
+      placeholder: "None"
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Required validation
+      description: Name the checks and observable evidence required before opening the PR.
+    validations:
+      required: true

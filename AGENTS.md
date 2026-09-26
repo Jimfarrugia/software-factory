@@ -17,9 +17,9 @@ runtime workflows.
   workers, with one branch, worktree, and OpenCode child session per issue.
 - Workers may commit, push their assigned branch, and open or update a pull
   request. Workers and reviewers must never merge. The coordinator may merge
-  only a non-draft PR with all required checks passing, no blocking review
-  findings, and no unresolved human decision. No agent may push to the default
-  branch directly.
+  only a non-draft, mergeable PR with all required checks passing, acceptance
+  criteria met, no blocking review findings, and no unresolved human decision
+  or conversation. No agent may push to the default branch directly.
 - Treat `docs/factory/workflow.md` and `docs/agents/*.md` as the workflow contract.
 - Run `scripts/validate-template` after changing factory configuration or
   vendored files. Run project-specific checks for product changes.

@@ -26,13 +26,38 @@ for path in "${required[@]}"; do
 done
 
 python - <<'PY'
+import fnmatch
 import json
+import re
 from pathlib import Path
 
-json.loads(Path("opencode.jsonc").read_text())
+config = json.loads(Path("opencode.jsonc").read_text())
 lock = json.loads(Path("upstream-lock.json").read_text())
 assert lock["schemaVersion"] == 1
 assert len(lock["sources"]) == 2
+
+def agent_permissions(path):
+    frontmatter = Path(path).read_text().split("---", 2)[1]
+    rules = []
+    for block in re.split(r"\n  - action: ", frontmatter)[1:]:
+        action = block.splitlines()[0].strip()
+        resource = re.search(r'\n    resource: "([^"]+)"', block)
+        effect = re.search(r"\n    effect: (\w+)", block)
+        if resource and effect:
+            rules.append({"action": action, "resource": resource.group(1), "effect": effect.group(1)})
+    return rules
+
+def effective_merge_permission(agent):
+    command = "gh pr merge 123"
+    rules = config["permissions"] + agent_permissions(f".opencode/agents/{agent}.md")
+    matches = [rule for rule in rules if fnmatch.fnmatchcase("shell", rule["action"])
+               and fnmatch.fnmatchcase(command, rule["resource"])]
+    assert matches, f"no merge permission rule for {agent}"
+    return matches[-1]["effect"]
+
+assert effective_merge_permission("factory") == "allow"
+assert effective_merge_permission("worker") == "deny"
+assert effective_merge_permission("reviewer") == "deny"
 PY
 
 aggregate_hash() {
@@ -50,10 +75,6 @@ actual_ponytail=$(cd vendor/ponytail && aggregate_hash)
 grep -q '^model: openai/gpt-5.6-luna#high$' .opencode/agents/factory.md
 grep -q '^model: openai/gpt-5.6-luna#high$' .opencode/agents/worker.md
 grep -q '^model: openai/gpt-5.6-luna#high$' .opencode/agents/reviewer.md
-grep -A1 'resource: "gh pr merge \*"' .opencode/agents/factory.md | grep -q 'effect: allow'
-grep -A1 'resource: "gh pr merge \*"' .opencode/agents/worker.md | grep -q 'effect: deny'
-grep -A1 'resource: "gh pr merge \*"' .opencode/agents/reviewer.md | grep -q 'effect: deny'
-
 git diff --check
 shellcheck scripts/factory-setup scripts/factory-start-worker scripts/factory-status scripts/validate-template
 

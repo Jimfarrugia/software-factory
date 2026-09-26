@@ -48,8 +48,9 @@ independently.
 5. Answer issues in the human queue when the factory needs a decision or
    privileged action.
 6. The coordinator reviews completed PRs and may merge them after required
-   checks pass and no blocking findings or human decisions remain. You can still
-   review or merge any PR yourself.
+   checks pass, acceptance criteria are met, and no blocking findings, human
+   decisions, or conversations remain. The PR must also be non-draft and
+   mergeable. You can still review or merge any PR yourself.
 
 Useful prompts:
 

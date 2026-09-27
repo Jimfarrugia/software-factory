@@ -73,7 +73,8 @@ def monitor(coordinator, worker, root, prompt=None, call=api, sleep=time.sleep):
                         "id": state["event"], "delivery": "queue", "resume": True,
                         "text": f"Factory completion: worker {worker} is idle (outcome: "
                                 f"{child.get('outcome', 'unknown')}). Inspect its results and "
-                                "GitHub before acting. Continue the already authorized queue: "
+                                "GitHub before acting. Read docs/factory/completion-handoff.md "
+                                "for updated dispatch and resume instructions. Continue the already authorized queue: "
                                 "review, fix, check, merge when eligible, then dispatch. "
                                 "Respect any later stop request; do not duplicate workers. "
                                 "If blocked, report the specific human action needed."

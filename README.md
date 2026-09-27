@@ -63,6 +63,10 @@ Show factory status
 
 ## Core flow
 
+Workers notify their owning coordinator when they finish. See
+[completion and recovery](docs/factory/completion-handoff.md) for resuming work,
+pausing a queue, and recovering interrupted monitors. Python 3 is required.
+
 ```text
 idea -> grill-with-docs -> spec -> implementation tickets -> workers -> PR
   \-> wayfinder -> decision tickets -> spec --------------------/

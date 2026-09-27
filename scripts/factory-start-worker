@@ -2,15 +2,18 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 <issue-number> <worktree> <prompt-file>" >&2
+  echo "usage: $0 <issue-number> <worktree> <prompt-file> <coordinator-session>" >&2
   exit 2
 }
 
-[[ $# -eq 3 ]] || usage
+[[ $# -eq 4 ]] || usage
 
 issue=$1
 worktree=$2
 prompt_file=$3
+coordinator=$4
+[[ $coordinator =~ ^ses_[a-zA-Z0-9_]+$ ]] || usage
+script_dir=$(cd "$(dirname "$0")" && pwd -P)
 
 [[ $issue =~ ^[1-9][0-9]*$ ]] || { echo "error: issue number must be a positive integer" >&2; exit 1; }
 [[ -d $worktree ]] || { echo "error: worktree does not exist: $worktree" >&2; exit 1; }
@@ -53,17 +56,16 @@ state_dir=.factory/sessions
 mkdir -p "$state_dir"
 log_file="$state_dir/$session_id.log"
 state_file="$state_dir/$session_id.json"
-prompt_payload=$(jq -Rs '{text: ., resume: true}' < "$prompt_file")
-
-nohup opencode api post "/api/session/$session_id/prompt" --data "$prompt_payload" >"$log_file" 2>&1 &
+nohup python3 "$script_dir/factory-monitor" "$coordinator" "$session_id" --prompt-file "$prompt_file" >"$log_file" 2>&1 &
 worker_pid=$!
 
 jq -n \
   --arg sessionID "$session_id" \
+  --arg coordinator "$coordinator" \
   --arg issue "$issue" \
   --arg branch "$branch" \
   --arg worktree "$worktree" \
   --arg log "$log_file" \
   --argjson pid "$worker_pid" \
-  '{sessionID: $sessionID, issue: ($issue | tonumber), branch: $branch, worktree: $worktree, pid: $pid, log: $log}' \
+  '{sessionID: $sessionID, coordinator: $coordinator, issue: ($issue | tonumber), branch: $branch, worktree: $worktree, monitorPID: $pid, log: $log}' \
   | tee "$state_file"

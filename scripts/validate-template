@@ -89,3 +89,4 @@ git diff --check
 shellcheck scripts/factory-setup scripts/factory-start-worker scripts/factory-status scripts/validate-template
 
 echo "Template validation passed."
+python3 scripts/test-handoff.py

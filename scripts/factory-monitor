@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""Wait for a worker and hand control back to its owning coordinator."""
+import argparse
+import fcntl
+import json
+import subprocess
+import time
+import uuid
+from pathlib import Path
+
+
+def api(method, path, body=None):
+    args = ["opencode", "api", method, path]
+    if body is not None:
+        args += ["--data", json.dumps(body)]
+    result = subprocess.run(args, check=True, capture_output=True, text=True, timeout=45)
+    return json.loads(result.stdout) if result.stdout.strip() else {}
+
+
+def save(path, state):
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(state, indent=2) + "\n")
+    temporary.replace(path)
+
+
+def monitor(coordinator, worker, root, prompt=None, call=api, sleep=time.sleep):
+    if coordinator == worker:
+        raise ValueError("coordinator and worker must be different sessions")
+    root.mkdir(parents=True, exist_ok=True)
+    paused = root / f"{coordinator}.paused"
+    path = root / f"{worker}.json"
+    with path.with_suffix(".lock").open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        owner = call("get", f"/api/session/{coordinator}")["data"]
+        child = call("get", f"/api/session/{worker}")["data"]
+        if owner["agent"] != "factory" or child["agent"] != "worker":
+            raise ValueError("expected factory coordinator and worker roles")
+        if owner["projectID"] != child["projectID"]:
+            raise ValueError("sessions must belong to the same project")
+        state = json.loads(path.read_text()) if path.exists() else {"coordinator": coordinator}
+        if state["coordinator"] != coordinator:
+            raise ValueError("worker already belongs to another coordinator")
+        if state.get("status") in ("submitting", "delivering", "delivery-uncertain"):
+            raise ValueError("inspect session inbox/history before recovering uncertain delivery")
+        if paused.exists():
+            return
+        if prompt is not None:
+            state.update(status="submitting", baseline=child.get("time", {}).get("idle"))
+            save(path, state)
+            try:
+                call("post", f"/api/session/{worker}/prompt", {"text": prompt, "resume": True})
+            except Exception as error:
+                state["error"] = str(error)
+                save(path, state)
+                raise
+            state["status"] = "waiting"
+            save(path, state)
+        try:
+            while not paused.exists():
+                child = call("get", f"/api/session/{worker}")["data"]
+                active = call("get", "/api/session/active")["data"]
+                idle = child.get("time", {}).get("idle")
+                if worker not in active and idle and idle != state.get("baseline"):
+                    if idle == state.get("notified"):
+                        return
+                    state.update(status="delivering", event="msg_" + uuid.uuid4().hex)
+                    save(path, state)
+                    if paused.exists():
+                        state["status"] = "paused"
+                        save(path, state)
+                        return
+                    call("post", f"/api/session/{coordinator}/prompt", {
+                        "id": state["event"], "delivery": "queue", "resume": True,
+                        "text": f"Factory completion: worker {worker} is idle (outcome: "
+                                f"{child.get('outcome', 'unknown')}). Inspect its results and "
+                                "GitHub before acting. Continue the already authorized queue: "
+                                "review, fix, check, merge when eligible, then dispatch. "
+                                "Respect any later stop request; do not duplicate workers. "
+                                "If blocked, report the specific human action needed."
+                    })
+                    state.update(status="notified", notified=idle)
+                    save(path, state)
+                    return
+                sleep(5)
+            state["status"] = "paused"
+            save(path, state)
+        except Exception as error:
+            state["status"] = "delivery-uncertain" if state.get("status") == "delivering" else "failed"
+            state["error"] = str(error)
+            save(path, state)
+            raise
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("coordinator")
+    parser.add_argument("worker")
+    parser.add_argument("--prompt-file", type=Path)
+    parser.add_argument("--state-dir", type=Path, default=Path(".factory/handoffs"))
+    args = parser.parse_args()
+    for session in (args.coordinator, args.worker):
+        if not session.startswith("ses_") or not all(c.isalnum() or c == "_" for c in session):
+            parser.error("invalid session ID")
+    monitor(args.coordinator, args.worker, args.state_dir,
+            args.prompt_file.read_text() if args.prompt_file else None)

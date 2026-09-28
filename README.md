@@ -30,7 +30,7 @@ without cutting safety.
 7. Describe a feature, invoke `/factory-intake`, or ask for `/factory-status`.
 
 The coordinator, workers, and reviewer default to
-`openai/gpt-5.6-luna#high`. Their Markdown definitions can be changed
+`openai/gpt-6-luna#high`. Their Markdown definitions can be changed
 independently.
 
 ## Using the factory

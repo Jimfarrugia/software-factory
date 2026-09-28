@@ -85,6 +85,7 @@ actual_ponytail=$(cd vendor/ponytail && aggregate_hash)
 grep -q '^model: openai/gpt-5.6-luna#high$' .opencode/agents/factory.md
 grep -q '^model: openai/gpt-5.6-luna#high$' .opencode/agents/worker.md
 grep -q '^model: openai/gpt-5.6-luna#high$' .opencode/agents/reviewer.md
+grep -q -- '--label factory:ready --label factory:type:implementation' scripts/factory-status
 git diff --check
 shellcheck scripts/factory-setup scripts/factory-start-worker scripts/factory-status scripts/validate-template
 

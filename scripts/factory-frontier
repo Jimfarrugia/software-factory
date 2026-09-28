@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+"""Report or check dispatch eligibility for implementation issues."""
+import argparse
+import json
+import re
+import subprocess
+import sys
+
+ACTIVE = {"factory:needs-triage", "factory:needs-spec", "factory:ready", "factory:human",
+          "factory:running", "factory:blocked", "factory:review", "factory:wontfix"}
+
+
+def labels(issue):
+    return {item["name"] if isinstance(item, dict) else item for item in issue.get("labels", [])}
+
+
+def references(text):
+    return {int(number) for number in re.findall(r"(?<![\w])#(\d+)\b", text or "")}
+
+
+def field_text(body, name):
+    flat = re.search(rf"(?im)^\s*{re.escape(name)}\s*:\s*(.*?)\s*$", body or "")
+    if flat:
+        return flat.group(1)
+    sections = re.split(r"(?m)^#{1,6}\s+", body or "")
+    for section in sections[1:]:
+        heading, _, content = section.partition("\n")
+        heading = heading.strip().rstrip("#").strip().casefold()
+        if heading == name.casefold() or (name.casefold() == "parent" and heading.startswith("parent ")):
+            return content.strip()
+    return None
+
+
+def parse_relationship(issue, key, field):
+    native = issue.get(key)
+    native_ids = {int(value.get("number", value) if isinstance(value, dict) else value)
+                  for value in (native or [])} if key == "blocked_by" else set()
+    if key == "parent" and native is not None:
+        native_ids = {int(native.get("number", native) if isinstance(native, dict) else native)}
+    text = field_text(issue.get("body", ""), field)
+    if text is None:
+        return native_ids, key == "parent" and not native_ids
+    if key == "blocked_by" and text.strip().casefold() == "none":
+        return native_ids, False
+    refs = references(text)
+    residue = re.sub(r"#\d+", "", text).strip(" \t\r\n,;:.-")
+    malformed = not refs or bool(residue)
+    return native_ids | refs, malformed
+
+
+def dispatch_verdict(ticket, issues):
+    by_number = {int(item["number"]): item for item in issues}
+    labels_ = labels(ticket)
+    reasons = []
+
+    def fail(text, resolve):
+        reasons.append(f"{text}; resolve by applying {resolve} (coordinator action)")
+
+    active = labels_ & ACTIVE
+    if ticket.get("state", "OPEN").upper() != "OPEN" or "factory:type:implementation" not in labels_ or active != {"factory:ready"} or labels_ & {"factory:type:feature", "factory:type:decision"} or any(x.startswith("wayfinder:") for x in labels_):
+        fail("ticket must be open, implementation-only, and in exactly the ready state", "factory:ready")
+    parents, malformed_parent = parse_relationship(ticket, "parent", "Parent")
+    if malformed_parent or len(parents) != 1:
+        fail("parent is missing, malformed, or ambiguous", "factory:human")
+        parent = None
+    else:
+        parent = by_number.get(next(iter(parents)))
+        if parent is None:
+            fail("parent issue could not be resolved", "factory:human")
+    if parent is not None:
+        parent_labels = labels(parent)
+        if "factory:type:feature" not in parent_labels or "factory:spec-approved" not in parent_labels or any(x.startswith("wayfinder:") for x in parent_labels):
+            fail("parent must be an approved feature, not a Wayfinder map", "factory:human")
+
+    blockers, malformed_blockers = parse_relationship(ticket, "blocked_by", "Blocked by")
+    if malformed_blockers:
+        fail("blocker list is missing or malformed", "factory:human")
+    for number in sorted(blockers):
+        blocker = by_number.get(number)
+        if blocker is None:
+            fail(f"blocker #{number} could not be resolved", "factory:human")
+        elif blocker.get("state", "OPEN").upper() != "CLOSED":
+            fail(f"blocker #{number} is not closed", "factory:blocked")
+
+    if parent is not None:
+        if "factory:human" in labels(parent):
+            fail("parent has unresolved human input", "factory:ready")
+        if any(item.get("state", "OPEN").upper() == "OPEN"
+               and "factory:type:decision" in labels(item)
+               and not parse_relationship(item, "parent", "Parent")[1]
+               and parse_relationship(item, "parent", "Parent")[0] & {int(parent["number"])}
+               for item in issues):
+            fail("an open decision ticket remains for the parent", "factory:human")
+    if "factory:ready" in labels_ and any("factory-claim" in str(comment) for comment in ticket.get("comments", [])):
+        fail("ticket has a stale factory claim while still ready", "factory:running")
+    return {"number": int(ticket["number"]), "dispatchable": not reasons, "reasons": reasons}
+
+
+def lint_issues(issues):
+    messages = []
+    for item in issues:
+        if item.get("state", "OPEN").upper() != "OPEN":
+            continue
+        current = labels(item)
+        types = {label for label in current if label.startswith("factory:type:")}
+        active = current & ACTIVE
+        number = item["number"]
+        if len(types) != 1:
+            messages.append(f"#{number}: exactly one factory:type label is required")
+        if len(active) > 1:
+            messages.append(f"#{number}: at most one active state label is allowed")
+        if "factory:ready" in current and "factory:type:implementation" not in current:
+            messages.append(f"#{number}: factory:ready requires factory:type:implementation")
+        if "factory:type:feature" in current and current & {"factory:ready", "factory:running", "factory:review"}:
+            messages.append(f"#{number}: feature cannot carry ready, running, or review")
+        if "factory:type:decision" in current and "factory:ready" in current:
+            messages.append(f"#{number}: decision cannot carry factory:ready")
+    blockers = set()
+    for item in issues:
+        if item.get("state", "OPEN").upper() != "OPEN":
+            continue
+        refs, malformed = parse_relationship(item, "blocked_by", "Blocked by")
+        if not malformed:
+            blockers.update(refs)
+    for item in issues:
+        if item.get("state", "OPEN").upper() == "OPEN" and "factory:wontfix" in labels(item) and int(item["number"]) in blockers:
+            messages.append(f"#{item['number']}: open factory:wontfix issue is referenced as a blocker")
+    return messages
+
+
+def gh(*args):
+    result = subprocess.run(["gh", *args], check=True, capture_output=True, text=True)
+    return result.stdout
+
+
+def fetch():
+    listing = json.loads(gh("issue", "list", "--state", "open", "--limit", "1000",
+                            "--json", "number,title,body,labels,state"))
+    for item in listing:
+        item["comments"] = []
+    return listing
+
+
+def enrich(issue, issues):
+    """Load referenced closed issues and the selected ticket's native edges/comments."""
+    parent_refs, _ = parse_relationship(issue, "parent", "Parent")
+    blocker_refs, _ = parse_relationship(issue, "blocked_by", "Blocked by")
+    by_number = {int(item["number"]): item for item in issues}
+    for number in sorted((parent_refs | blocker_refs) - by_number.keys()):
+        try:
+            related = json.loads(gh("issue", "view", str(number), "--json", "number,title,body,labels,state"))
+        except subprocess.CalledProcessError as error:
+            if "not found" in (error.stderr or "").casefold() or "could not resolve to an issue" in (error.stderr or "").casefold():
+                continue
+            raise
+        issues.append(related)
+        by_number[number] = related
+    owner_repo = gh("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner").strip().split("/", 1)
+    query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){parent{number} blockedBy(first:100){nodes{number}}}}}"
+    response = json.loads(gh("api", "graphql", "-f", f"query={query}", "-F", f"owner={owner_repo[0]}",
+                             "-F", f"name={owner_repo[1]}", "-F", f"number={issue['number']}"))
+    native = response["data"]["repository"]["issue"]
+    if native.get("parent"):
+        issue["parent"] = native["parent"]["number"]
+    issue["blocked_by"] = [node["number"] for node in native.get("blockedBy", {}).get("nodes", [])]
+    native_refs = {issue["parent"]} if issue.get("parent") else set()
+    native_refs.update(issue["blocked_by"])
+    for number in sorted(native_refs - by_number.keys()):
+        try:
+            related = json.loads(gh("issue", "view", str(number), "--json", "number,title,body,labels,state"))
+        except subprocess.CalledProcessError as error:
+            if "not found" in (error.stderr or "").casefold() or "could not resolve to an issue" in (error.stderr or "").casefold():
+                continue
+            raise
+        issues.append(related)
+        by_number[number] = related
+    comments = gh("issue", "view", str(issue["number"]), "--comments")
+    issue["comments"] = [comments] if "factory-claim" in comments else []
+
+
+def evaluate(issue, issues):
+    enrich(issue, issues)
+    return dispatch_verdict(issue, issues)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__ + " Exit 1 from --check is an expected ineligible outcome, not an error.")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--check", type=int, metavar="N", help="gate one issue (0 eligible, 1 ineligible, 2 unable to evaluate)")
+    group.add_argument("--lint", action="store_true", help="report documented label invariant violations")
+    group.add_argument("--json", action="store_true", help="emit JSON verdicts")
+    parser.add_argument("issues", nargs="*", type=int, help="report selected issue numbers; bare mode lists ready candidates")
+    args = parser.parse_args(argv)
+    try:
+        issues = fetch()
+        if args.check is not None:
+            target = next((item for item in issues if item["number"] == args.check), None)
+            if target is None:
+                target = json.loads(gh("issue", "view", str(args.check), "--json", "number,title,body,labels,state"))
+                target["comments"] = []
+            result = evaluate(target, issues)
+            print("dispatchable" if result["dispatchable"] else "ineligible: " + "; ".join(result["reasons"]))
+            return 0 if result["dispatchable"] else 1
+        if args.lint:
+            for message in lint_issues(issues):
+                print(message)
+            return 0
+        if args.issues:
+            selected = []
+            for number in args.issues:
+                item = next((candidate for candidate in issues if candidate["number"] == number), None)
+                if item is None:
+                    item = json.loads(gh("issue", "view", str(number), "--json", "number,title,body,labels,state"))
+                    issues.append(item)
+                selected.append(item)
+        else:
+            selected = [item for item in issues if "factory:ready" in labels(item)]
+        results = [evaluate(item, issues) for item in selected]
+        if args.json:
+            print(json.dumps(results))
+        else:
+            for result in results:
+                print(f"#{result['number']}: {'dispatchable' if result['dispatchable'] else 'ineligible'}" + (" — " + "; ".join(result["reasons"]) if result["reasons"] else ""))
+        return 0
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError, KeyError, ValueError) as error:
+        detail = error.stderr.strip() if isinstance(error, subprocess.CalledProcessError) and error.stderr else str(error)
+        print(f"error: could not evaluate dispatch eligibility: {detail}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

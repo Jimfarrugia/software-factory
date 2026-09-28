@@ -9,7 +9,10 @@
 - **Feature**: the parent GitHub issue containing an approved implementation spec.
 - **Decision ticket**: a Wayfinder issue that resolves uncertainty; it is not build work.
 - **Implementation ticket**: one independently verifiable tracer-bullet slice of a feature.
-- **Frontier**: ready implementation tickets whose blockers are all closed.
+- **Dispatch verdict**: the executable eligibility decision for one implementation
+  ticket, reported by `scripts/factory-frontier`.
+- **Frontier**: ready implementation tickets whose blockers are all closed;
+  `scripts/factory-frontier` reports their dispatch verdicts.
 - **Claim**: the coordinator's machine-readable issue comment linking a running session,
   branch, and worktree to a ticket.
 - **Human queue**: issues that require a decision, access, approval, or other human action.

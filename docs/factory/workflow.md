@@ -44,6 +44,14 @@ At most one active state applies:
 
 Closed issues are terminal; there is no redundant done label.
 
+State labels describe implementation tickets. A feature issue keeps its
+`factory:type:feature` label, uses `factory:spec-approved` once its spec is
+approved, and must never carry `factory:ready`, `factory:running`, or
+`factory:review`. A decision issue never carries `factory:ready` either. If a
+feature needs human input, use `factory:human`; if it needs more specification,
+use `factory:needs-spec`. A `factory:ready` issue without
+`factory:type:implementation` is mislabeled and is excluded from the frontier.
+
 Typical implementation flow:
 
 ```text

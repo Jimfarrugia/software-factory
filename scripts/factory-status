@@ -6,10 +6,10 @@ gh auth status >/dev/null
 
 print_state() {
   local heading=$1
-  local label=$2
+  shift
   echo "## $heading"
   local output
-  output=$(gh issue list --state open --label "$label" --limit 100 \
+  output=$(gh issue list --state open "$@" --limit 100 \
     --json number,title,url,labels,assignees \
     --jq '.[] | "- [#\(.number) \(.title)](\(.url)) — labels: \([.labels[].name] | join(", ")); assignees: \(if (.assignees | length) == 0 then "none" else [.assignees[].login] | join(", ") end)"')
   if [[ -n $output ]]; then
@@ -23,10 +23,24 @@ print_state() {
 repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
 echo "# Factory status — $repo"
 echo
-print_state "Ready frontier candidates" "factory:ready"
-print_state "Running" "factory:running"
-print_state "Human queue" "factory:human"
-print_state "Review" "factory:review"
-print_state "Blocked" "factory:blocked"
+# Only implementation tickets can enter the worker frontier. Feature and
+# decision issues use type labels plus factory:spec-approved or factory:human.
+print_state "Ready frontier candidates" --label factory:ready --label factory:type:implementation
+print_state "Running" --label factory:running
+print_state "Human queue" --label factory:human
+print_state "Review" --label factory:review
+print_state "Blocked" --label factory:blocked
+
+mislabeled=$(gh issue list --state open --label factory:ready --limit 100 \
+  --json number,title,url,labels \
+  --jq '.[] | select(([.labels[].name] | index("factory:type:implementation")) == null)
+    | "- [#\(.number) \(.title)](\(.url))"')
+if [[ -n $mislabeled ]]; then
+  echo "## Mislabeled factory:ready issues"
+  echo "$mislabeled"
+  echo
+  echo "State labels belong to implementation tickets. Remove factory:ready and use the type-appropriate state."
+  echo
+fi
 
 echo "This is a queue snapshot. The coordinator must still verify parent specs, blockers, claims, worktrees, sessions, and PRs."

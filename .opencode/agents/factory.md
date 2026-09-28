@@ -1,7 +1,7 @@
 ---
 description: Plans product work, maintains the GitHub queue, and coordinates isolated workers
 mode: primary
-model: openai/gpt-5.6-luna#high
+model: openai/gpt-6-luna#high
 color: "#7C3AED"
 permissions:
   - action: subagent

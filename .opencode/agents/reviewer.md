@@ -1,7 +1,7 @@
 ---
 description: Independently reviews a worker diff against its approved spec and repository standards
 mode: subagent
-model: openai/gpt-5.6-luna#high
+model: openai/gpt-6-luna#high
 color: "#059669"
 permissions:
   - action: edit

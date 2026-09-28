@@ -1,6 +1,9 @@
 """Hermetic tests for the dispatch eligibility decision."""
+import json
 import runpy
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,6 +16,11 @@ main = frontier["main"]
 def issue(number, body="", labels=(), state="OPEN", **extra):
     return {"number": number, "body": body, "labels": list(labels), "state": state,
             "title": f"Issue {number}", **extra}
+
+
+def run_main(arguments):
+    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+        return main(arguments)
 
 
 class FrontierTests(unittest.TestCase):
@@ -41,6 +49,20 @@ class FrontierTests(unittest.TestCase):
                 result = verdict(self.ticket | {"body": body}, known)
                 self.assertFalse(result["dispatchable"])
                 self.assertTrue(result["reasons"])
+
+    def test_fenced_examples_and_prose_do_not_define_relationships(self):
+        bodies = (
+            "Description.\n\n```\nParent: #1\nBlocked by: None\n```\n",
+            "Description.\n\n```\n### Parent feature\n#1\n```\nBlocked by: None\n",
+            "See docs; the convention is Parent: #1 for children.\n",
+        )
+        for body in bodies:
+            with self.subTest(body=body):
+                self.assertFalse(verdict(self.ticket | {"body": body}, [self.parent])["dispatchable"])
+        real_then_example = self.ticket | {
+            "body": "Parent: #1\nBlocked by: None\n\n~~~\nParent: #99\n~~~\n"
+        }
+        self.assertTrue(verdict(real_then_example, [self.parent])["dispatchable"])
 
     def test_parent_type_approval_wayfinder_and_human(self):
         for parent in (issue(1, labels=["factory:type:decision"]),
@@ -82,25 +104,70 @@ class FrontierTests(unittest.TestCase):
         warning = lint([issue(6, "Blocked by: #7", ["factory:type:implementation", "factory:ready"]),
                         issue(7, labels=["factory:type:implementation", "factory:wontfix"])])
         self.assertTrue(any("referenced as a blocker" in message for message in warning))
+        native_warning = lint([
+            issue(8, labels=["factory:type:implementation", "factory:ready"], blockedBy={"nodes": [{"number": 9}]}),
+            issue(9, labels=["factory:type:implementation", "factory:wontfix"]),
+        ])
+        self.assertTrue(any("referenced as a blocker" in message for message in native_warning))
+
+    def test_bulk_native_shape_and_verdict_metadata(self):
+        ticket = self.ticket | {
+            "parent": {"number": 1}, "blockedBy": {"nodes": []},
+            "title": "Ready issue", "url": "https://example.invalid/issues/2",
+        }
+        result = verdict(ticket, [self.parent, ticket])
+        self.assertTrue(result["dispatchable"])
+        self.assertEqual(result["title"], "Ready issue")
+        self.assertEqual(result["url"], "https://example.invalid/issues/2")
+
+    def test_one_bulk_invocation_for_candidate_in_bare_mode(self):
+        data = [
+            self.parent,
+            self.ticket,
+        ]
+        calls = []
+
+        def run(command, **_kwargs):
+            calls.append(command)
+            return type("Result", (), {"stdout": json.dumps(data)})()
+
+        with patch.object(frontier["subprocess"], "run", side_effect=run):
+            self.assertEqual(run_main([]), 0)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][:3], ["gh", "issue", "list"])
+        self.assertEqual(calls[0][-1], "number,title,url,body,labels,state,blockedBy,parent,comments")
+
+    def test_only_missing_relationships_use_individual_issue_reads(self):
+        ticket = self.ticket | {"body": "Parent: #1\nBlocked by: #3"}
+        calls = []
+
+        def run(command, **_kwargs):
+            calls.append(command)
+            return type("Result", (), {"stdout": json.dumps(issue(3, state="CLOSED"))})()
+
+        with patch.object(frontier["subprocess"], "run", side_effect=run):
+            frontier["enrich"](ticket, [self.parent, ticket])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][:4], ["gh", "issue", "view", "3"])
 
     def test_gate_exit_codes_and_infrastructure_failure(self):
         namespace = main.__globals__
         with patch.dict(namespace, {"fetch": lambda: [self.parent, self.ticket],
                                    "enrich": lambda *_: None}):
-            self.assertEqual(main(["--check", "2"]), 0)
+            self.assertEqual(run_main(["--check", "2"]), 0)
             blocked = self.ticket | {"body": "Parent: #1\nBlocked by: #99"}
             with patch.dict(namespace, {"fetch": lambda: [self.parent, blocked]}):
-                self.assertEqual(main(["--check", "2"]), 1)
+                self.assertEqual(run_main(["--check", "2"]), 1)
         with patch.object(frontier["subprocess"], "run", side_effect=FileNotFoundError("gh")):
-            self.assertEqual(main(["--check", "2"]), 2)
+            self.assertEqual(run_main(["--check", "2"]), 2)
 
     def test_reporting_modes_do_not_use_ineligibility_exit_codes(self):
         namespace = main.__globals__
         with patch.dict(namespace, {"fetch": lambda: [self.parent, self.ticket],
                                    "enrich": lambda *_: None}):
-            self.assertEqual(main([]), 0)
-            self.assertEqual(main(["--json"]), 0)
-            self.assertEqual(main(["--lint"]), 0)
+            self.assertEqual(run_main([]), 0)
+            self.assertEqual(run_main(["--json"]), 0)
+            self.assertEqual(run_main(["--lint"]), 0)
 
 
 if __name__ == "__main__":

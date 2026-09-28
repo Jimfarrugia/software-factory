@@ -19,6 +19,7 @@ def references(text):
 
 
 def field_text(body, name):
+    body = re.sub(r"(?ms)^[ \t]*(`{3,}|~{3,})[^\n]*\n.*?^[ \t]*\1[ \t]*(?:\n|$)", "", body or "")
     flat = re.search(rf"(?im)^\s*{re.escape(name)}\s*:\s*(.*?)\s*$", body or "")
     if flat:
         return flat.group(1)
@@ -33,8 +34,14 @@ def field_text(body, name):
 
 def parse_relationship(issue, key, field):
     native = issue.get(key)
-    native_ids = {int(value.get("number", value) if isinstance(value, dict) else value)
-                  for value in (native or [])} if key == "blocked_by" else set()
+    if key == "blocked_by":
+        native = issue.get("blocked_by", issue.get("blockedBy", native))
+        if isinstance(native, dict):
+            native = native.get("nodes", [])
+        native_ids = {int(value.get("number", value) if isinstance(value, dict) else value)
+                      for value in (native or [])}
+    else:
+        native_ids = set()
     if key == "parent" and native is not None:
         native_ids = {int(native.get("number", native) if isinstance(native, dict) else native)}
     text = field_text(issue.get("body", ""), field)
@@ -93,7 +100,8 @@ def dispatch_verdict(ticket, issues):
             fail("an open decision ticket remains for the parent", "factory:human")
     if "factory:ready" in labels_ and any("factory-claim" in str(comment) for comment in ticket.get("comments", [])):
         fail("ticket has a stale factory claim while still ready", "factory:running")
-    return {"number": int(ticket["number"]), "dispatchable": not reasons, "reasons": reasons}
+    return {"number": int(ticket["number"]), "title": ticket.get("title"), "url": ticket.get("url"),
+            "dispatchable": not reasons, "reasons": reasons}
 
 
 def lint_issues(issues):
@@ -135,47 +143,24 @@ def gh(*args):
 
 def fetch():
     listing = json.loads(gh("issue", "list", "--state", "open", "--limit", "1000",
-                            "--json", "number,title,body,labels,state"))
-    for item in listing:
-        item["comments"] = []
+                            "--json", "number,title,url,body,labels,state,blockedBy,parent,comments"))
     return listing
 
 
 def enrich(issue, issues):
-    """Load referenced closed issues and the selected ticket's native edges/comments."""
+    """Read absent relationships individually; open issue data comes from the bulk listing."""
     parent_refs, _ = parse_relationship(issue, "parent", "Parent")
     blocker_refs, _ = parse_relationship(issue, "blocked_by", "Blocked by")
     by_number = {int(item["number"]): item for item in issues}
     for number in sorted((parent_refs | blocker_refs) - by_number.keys()):
         try:
-            related = json.loads(gh("issue", "view", str(number), "--json", "number,title,body,labels,state"))
+            related = json.loads(gh("issue", "view", str(number), "--json", "number,title,url,body,labels,state,blockedBy,parent,comments"))
         except subprocess.CalledProcessError as error:
             if "not found" in (error.stderr or "").casefold() or "could not resolve to an issue" in (error.stderr or "").casefold():
                 continue
             raise
         issues.append(related)
         by_number[number] = related
-    owner_repo = gh("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner").strip().split("/", 1)
-    query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){parent{number} blockedBy(first:100){nodes{number}}}}}"
-    response = json.loads(gh("api", "graphql", "-f", f"query={query}", "-F", f"owner={owner_repo[0]}",
-                             "-F", f"name={owner_repo[1]}", "-F", f"number={issue['number']}"))
-    native = response["data"]["repository"]["issue"]
-    if native.get("parent"):
-        issue["parent"] = native["parent"]["number"]
-    issue["blocked_by"] = [node["number"] for node in native.get("blockedBy", {}).get("nodes", [])]
-    native_refs = {issue["parent"]} if issue.get("parent") else set()
-    native_refs.update(issue["blocked_by"])
-    for number in sorted(native_refs - by_number.keys()):
-        try:
-            related = json.loads(gh("issue", "view", str(number), "--json", "number,title,body,labels,state"))
-        except subprocess.CalledProcessError as error:
-            if "not found" in (error.stderr or "").casefold() or "could not resolve to an issue" in (error.stderr or "").casefold():
-                continue
-            raise
-        issues.append(related)
-        by_number[number] = related
-    comments = gh("issue", "view", str(issue["number"]), "--comments")
-    issue["comments"] = [comments] if "factory-claim" in comments else []
 
 
 def evaluate(issue, issues):

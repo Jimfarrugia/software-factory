@@ -19,7 +19,22 @@ def references(text):
 
 
 def field_text(body, name):
-    body = re.sub(r"(?ms)^[ \t]*(`{3,}|~{3,})[^\n]*\n.*?^[ \t]*\1[ \t]*(?:\n|$)", "", body or "")
+    visible = []
+    fence = None
+    fence_length = 0
+    for line in (body or "").splitlines():
+        stripped = line.strip()
+        if fence:
+            if stripped and set(stripped) == {fence} and len(stripped) >= fence_length:
+                fence = None
+            continue
+        opening = re.match(r"(`{3,}|~{3,})", stripped)
+        if opening:
+            fence = opening.group(1)[0]
+            fence_length = len(opening.group(1))
+            continue
+        visible.append(line)
+    body = "\n".join(visible)
     flat = re.search(rf"(?im)^\s*{re.escape(name)}\s*:\s*(.*?)\s*$", body or "")
     if flat:
         return flat.group(1)
@@ -181,7 +196,7 @@ def main(argv=None):
         if args.check is not None:
             target = next((item for item in issues if item["number"] == args.check), None)
             if target is None:
-                target = json.loads(gh("issue", "view", str(args.check), "--json", "number,title,body,labels,state"))
+                target = json.loads(gh("issue", "view", str(args.check), "--json", "number,title,url,body,labels,state"))
                 target["comments"] = []
             result = evaluate(target, issues)
             print("dispatchable" if result["dispatchable"] else "ineligible: " + "; ".join(result["reasons"]))
@@ -195,7 +210,7 @@ def main(argv=None):
             for number in args.issues:
                 item = next((candidate for candidate in issues if candidate["number"] == number), None)
                 if item is None:
-                    item = json.loads(gh("issue", "view", str(number), "--json", "number,title,body,labels,state"))
+                    item = json.loads(gh("issue", "view", str(number), "--json", "number,title,url,body,labels,state"))
                     issues.append(item)
                 selected.append(item)
         else:

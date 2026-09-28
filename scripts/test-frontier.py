@@ -51,18 +51,26 @@ class FrontierTests(unittest.TestCase):
                 self.assertTrue(result["reasons"])
 
     def test_fenced_examples_and_prose_do_not_define_relationships(self):
-        bodies = (
-            "Description.\n\n```\nParent: #1\nBlocked by: None\n```\n",
-            "Description.\n\n```\n### Parent feature\n#1\n```\nBlocked by: None\n",
-            "See docs; the convention is Parent: #1 for children.\n",
+        fences = (
+            "Text\n\n```\nParent: #1\n",
+            "Text\n\n```\nParent: #1\n````\n",
+            "Text\r\n\r\n```\r\nParent: #1\r\n```\r\n",
+            "Text\n\n~~~\nParent: #1\n~~~\n",
+            "Text\n\n```python\nParent: #1\n```\n",
+            "Text\n\n    ```\nParent: #1\n    ```\n",
         )
-        for body in bodies:
+        for body in (*fences, "See docs; the convention is Parent: #1 for children.\n"):
             with self.subTest(body=body):
-                self.assertFalse(verdict(self.ticket | {"body": body}, [self.parent])["dispatchable"])
-        real_then_example = self.ticket | {
-            "body": "Parent: #1\nBlocked by: None\n\n~~~\nParent: #99\n~~~\n"
-        }
-        self.assertTrue(verdict(real_then_example, [self.parent])["dispatchable"])
+                refs, malformed = frontier["parse_relationship"](
+                    issue(2, body, ["factory:type:implementation", "factory:ready"]), "parent", "Parent")
+                self.assertEqual(refs, set())
+                self.assertTrue(malformed)
+        for body in fences:
+            with self.subTest(real_field_followed_by=body):
+                combined = "Parent: #1\nBlocked by: None\n\n" + body
+                refs, malformed = frontier["parse_relationship"](self.ticket | {"body": combined}, "parent", "Parent")
+                self.assertEqual(refs, {1})
+                self.assertFalse(malformed)
 
     def test_parent_type_approval_wayfinder_and_human(self):
         for parent in (issue(1, labels=["factory:type:decision"]),
@@ -149,6 +157,23 @@ class FrontierTests(unittest.TestCase):
             frontier["enrich"](ticket, [self.parent, ticket])
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0][:4], ["gh", "issue", "view", "3"])
+
+    def test_json_command_fetches_metadata_for_issue_absent_from_batch(self):
+        target = self.ticket | {"url": "https://example.invalid/issues/2"}
+        calls = []
+
+        def gh(*args):
+            calls.append(args)
+            self.assertEqual(args[:3], ("issue", "view", "2"))
+            return json.dumps(target)
+
+        output = StringIO()
+        with patch.dict(main.__globals__, {"fetch": lambda: [self.parent], "gh": gh}), redirect_stdout(output):
+            self.assertEqual(main(["--json", "2"]), 0)
+        result, = json.loads(output.getvalue())
+        self.assertEqual(result["url"], target["url"])
+        self.assertEqual(result["title"], target["title"])
+        self.assertIn("title,url", calls[0][-1])
 
     def test_gate_exit_codes_and_infrastructure_failure(self):
         namespace = main.__globals__

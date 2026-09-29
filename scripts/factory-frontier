@@ -33,7 +33,8 @@ def validate_issue_record(issue):
         raise ValueError("issue record has an invalid number")
     if not isinstance(issue["title"], str) or not isinstance(issue["url"], str):
         raise ValueError("issue record has invalid title or url")
-    if issue["body"] is not None and not isinstance(issue["body"], str):
+    body = issue.get("body")
+    if body is not None and not isinstance(body, str):
         raise ValueError("issue record has an invalid body")
     if not isinstance(issue["state"], str) or issue["state"].upper() not in {"OPEN", "CLOSED"}:
         raise ValueError("issue record has an invalid state")

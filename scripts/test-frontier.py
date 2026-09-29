@@ -289,7 +289,7 @@ class FrontierTests(unittest.TestCase):
         self.assertEqual(calls[0][-1], frontier["ISSUE_FIELDS"])
 
     def test_truncated_bulk_view_cannot_be_evaluated_in_any_mode(self):
-        full_view = [{}] * frontier["ISSUE_LIMIT"]
+        full_view = [issue(number) for number in range(1, frontier["ISSUE_LIMIT"] + 1)]
         with patch.dict(main.__globals__, {"fetch": lambda: full_view}):
             error = StringIO()
             with redirect_stderr(error):
@@ -298,6 +298,23 @@ class FrontierTests(unittest.TestCase):
             for arguments in ([], ["--json"], ["--lint"]):
                 with self.subTest(arguments=arguments):
                     self.assertEqual(run_main(arguments), 2)
+
+    def test_required_issue_fields_are_validated_before_verdict(self):
+        missing_body = self.ticket | {
+            "parent": 1, "blockedBy": {"nodes": [{"number": 3}]},
+        }
+        del missing_body["body"]
+        wrong_title_type = self.ticket | {"title": 2}
+        for bad_ticket, records in (
+                (missing_body, [self.parent, missing_body, issue(3, state="CLOSED")]),
+                (wrong_title_type, [self.parent, wrong_title_type])):
+            with self.subTest(ticket=bad_ticket):
+                error = StringIO()
+                with patch.dict(main.__globals__, {"fetch": lambda: records}), \
+                     redirect_stderr(error), redirect_stdout(StringIO()):
+                    self.assertEqual(main(["--check", "2"]), 2)
+                self.assertIn("could not evaluate", error.getvalue().casefold())
+                self.assertNotIn("traceback", error.getvalue().casefold())
 
     def test_fallback_comments_still_detect_a_stale_claim(self):
         target = self.ticket | {
@@ -430,11 +447,18 @@ class FrontierTests(unittest.TestCase):
         for bad_issue in malformed:
             with self.subTest(record=bad_issue):
                 error = StringIO()
+
+                def gh(*_args):
+                    return json.dumps(bad_issue)
+
                 with patch.dict(main.__globals__, {"fetch": lambda: [self.parent, bad_issue]}), \
+                     patch.dict(main.__globals__, {"gh": gh}), \
                      redirect_stderr(error), redirect_stdout(StringIO()):
                     self.assertEqual(main(["--check", "2"]), 2)
                 self.assertIn("could not evaluate", error.getvalue().casefold())
                 self.assertNotIn("traceback", error.getvalue().casefold())
+                if bad_issue is missing_comments:
+                    self.assertIn("issue record is missing a required field", error.getvalue().casefold())
 
     def test_empty_comment_history_is_a_valid_dispatchable_record(self):
         output = StringIO()
@@ -445,17 +469,20 @@ class FrontierTests(unittest.TestCase):
         self.assertEqual(output.getvalue().strip(), "dispatchable")
 
     def test_malformed_individually_fetched_records_fail_closed(self):
-        absent_batch_target = self.ticket.copy()
-        del absent_batch_target["comments"]
+        absent_batch_target = self.ticket | {
+            "parent": 1, "blockedBy": {"nodes": [{"number": 3}]},
+        }
+        del absent_batch_target["body"]
         error = StringIO()
 
         def gh(*_args):
             return json.dumps(absent_batch_target)
 
-        with patch.dict(main.__globals__, {"fetch": lambda: [self.parent], "gh": gh}), \
+        with patch.dict(main.__globals__, {"fetch": lambda: [self.parent, issue(3, state="CLOSED")], "gh": gh}), \
              redirect_stderr(error), redirect_stdout(StringIO()):
             self.assertEqual(main(["--check", "2"]), 2)
         self.assertIn("could not evaluate", error.getvalue().casefold())
+        self.assertIn("issue record is missing a required field", error.getvalue().casefold())
 
         ticket = self.ticket | {"body": "Parent: #1\nBlocked by: #3"}
         absent_blocker_comments = issue(3, state="CLOSED")

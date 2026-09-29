@@ -35,6 +35,23 @@ class FrontierTests(unittest.TestCase):
     def check(self, ticket=None, others=()):
         return verdict(ticket or self.ticket, [self.parent, *(others)])
 
+    def assert_could_not_evaluate(self, issues, fallback=None):
+        error = StringIO()
+        result = {"number": 2, "title": None, "url": None,
+                  "dispatchable": True, "reasons": []}
+
+        def gh(*_args):
+            return json.dumps(fallback or self.ticket)
+
+        with patch.dict(main.__globals__, {
+                "fetch": lambda: issues,
+                "gh": gh,
+                "evaluate": lambda *_args: result,
+        }), redirect_stderr(error), redirect_stdout(StringIO()):
+            self.assertEqual(main(["--check", "2"]), 2)
+        self.assertIn("could not evaluate", error.getvalue().casefold())
+        self.assertNotIn("traceback", error.getvalue().casefold())
+
     def test_dispatchable_flat_relationships(self):
         self.assertTrue(self.check()["dispatchable"])
         with_blank = self.ticket | {"body": "Parent: #1\n\nBlocked by: None"}
@@ -496,6 +513,60 @@ class FrontierTests(unittest.TestCase):
              redirect_stderr(error), redirect_stdout(StringIO()):
             self.assertEqual(main(["--check", "2"]), 2)
         self.assertIn("could not evaluate", error.getvalue().casefold())
+
+    def test_issue_record_boundary_guards_fail_closed(self):
+        # These fixtures isolate validation: if a malformed record passes its
+        # boundary, the mocked evaluator returns a dispatchable result.
+        for value in (None, 7):
+            with self.subTest(record=value):
+                self.assert_could_not_evaluate([value])
+
+        missing = self.ticket.copy()
+        del missing["body"]
+        self.assert_could_not_evaluate([missing])
+
+        for number in (False, 0, -1, "2"):
+            with self.subTest(number=number):
+                bad = self.ticket | {"number": number}
+                self.assert_could_not_evaluate([bad], fallback=bad)
+
+        for changes in ({"title": 2}, {"url": None}):
+            with self.subTest(changes=changes):
+                self.assert_could_not_evaluate([self.ticket | changes])
+
+        self.assert_could_not_evaluate([self.ticket | {"body": 2}])
+        for state in (None, "MERGED"):
+            with self.subTest(state=state):
+                self.assert_could_not_evaluate([self.ticket | {"state": state}])
+
+        for labels in (("factory:type:implementation", "factory:ready"),
+                       ["factory:type:implementation", 2],
+                       ["factory:type:implementation", {"name": None}]):
+            with self.subTest(labels=labels):
+                self.assert_could_not_evaluate([self.ticket | {"labels": labels}])
+
+        for comments in (({"body": "discussion"},), [None], [{"body": None}]):
+            with self.subTest(comments=comments):
+                self.assert_could_not_evaluate([self.ticket | {"comments": comments}])
+
+        for parent in (True, "1", {"number": "1"}):
+            with self.subTest(parent=parent):
+                self.assert_could_not_evaluate([self.ticket | {"parent": parent}])
+
+        for blocked_by in ([3], {}, {"nodes": (3,)}):
+            with self.subTest(blockedBy=blocked_by):
+                self.assert_could_not_evaluate([self.ticket | {"blockedBy": blocked_by}])
+
+        for node in (3, {}, {"number": "3"}, {"number": 0}, {"number": True}):
+            with self.subTest(blockedByNode=node):
+                self.assert_could_not_evaluate([
+                    self.ticket | {"blockedBy": {"nodes": [node]}}
+                ])
+
+    def test_bulk_issue_listing_must_be_a_list(self):
+        for bulk in (None, 7):
+            with self.subTest(bulk=bulk):
+                self.assert_could_not_evaluate(bulk)
 
     def test_failed_paginated_comment_request_fails_closed(self):
         limit = frontier["COMMENT_LIMIT"]

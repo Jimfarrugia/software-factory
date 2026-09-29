@@ -84,15 +84,19 @@ expected_ponytail=$(python -c 'import json; print(json.load(open("upstream-lock.
 actual_ponytail=$(cd vendor/ponytail && aggregate_hash)
 [[ $actual_ponytail == "$expected_ponytail" ]] || { echo "error: Ponytail vendor hash differs from upstream-lock.json" >&2; exit 1; }
 
-expected_model='openai/gpt-6-luna#high'
-model_id=${expected_model#*/}
-model_id=${model_id%%#*}
+expected_model='opencode-go/deepseek-v4.1-flash#high'
+model_path=${expected_model%%#*}
+expected_provider=${model_path%%/*}
+model_id=${model_path#*/}
+expected_variant=${expected_model##*#}
 grep -q "^model: ${expected_model}\$" .opencode/agents/factory.md
 grep -q "^model: ${expected_model}\$" .opencode/agents/worker.md
 grep -q "^model: ${expected_model}\$" .opencode/agents/reviewer.md
 # factory-start-worker pins the worker model explicitly in the session payload,
-# which overrides the agent definition; keep the two in step.
-grep -q "model: {providerID: \"openai\", id: \"$model_id\", variant: \"high\"}" scripts/factory-start-worker
+# which overrides the agent definition; keep the two in step. Provider, id, and
+# variant are all derived from expected_model, so changing provider or variant
+# cannot leave this assertion silently mismatched.
+grep -q "model: {providerID: \"${expected_provider}\", id: \"${model_id}\", variant: \"${expected_variant}\"}" scripts/factory-start-worker
 grep -q -- 'scripts/factory-frontier' scripts/factory-status
 grep -q -- 'scripts/factory-frontier --check' .opencode/skills/factory-dispatch/SKILL.md
 git diff --check

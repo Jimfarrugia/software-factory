@@ -21,7 +21,9 @@ without cutting safety.
 
 1. Create a repository from this GitHub template and clone it.
 2. Install OpenCode V2, GitHub CLI (`gh`), Git, Bash, and `jq`.
-3. Authenticate: `gh auth login` and configure your OpenAI provider in OpenCode.
+3. Authenticate: `gh auth login` and configure your model provider in OpenCode.
+   The defaults use `opencode-go`, so a different provider requires changing the
+   pins described below.
 4. Run `scripts/factory-setup` to create the label vocabulary.
 5. Protect the default branch as described in `docs/factory/security.md`. Solo
    owners using one GitHub identity must allow self-merge by requiring zero
@@ -30,8 +32,10 @@ without cutting safety.
 7. Describe a feature, invoke `/factory-intake`, or ask for `/factory-status`.
 
 The coordinator, workers, and reviewer default to
-`openai/gpt-6-luna#high`. Their Markdown definitions can be changed
-independently.
+`opencode-go/deepseek-v4.1-flash#high`. Their Markdown definitions can be changed
+independently — except for a dispatched worker's model, which
+`scripts/factory-start-worker` sets explicitly when it creates the session and which
+therefore overrides `worker.md`.
 
 ## Using the factory
 

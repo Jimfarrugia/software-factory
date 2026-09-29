@@ -6,6 +6,7 @@ import json
 import subprocess
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -17,13 +18,75 @@ def api(method, path, body=None):
     return json.loads(result.stdout) if result.stdout.strip() else {}
 
 
+def gh_json(args):
+    result = subprocess.run(["gh", *args], check=True, capture_output=True, text=True, timeout=45)
+    return json.loads(result.stdout) if result.stdout.strip() else []
+
+
+def relevance(worker, root, gh=gh_json):
+    """Decide whether a worker's completion is still actionable.
+
+    Reads the issue and branch that ``factory-start-worker`` wrote to the
+    sibling ``sessions`` directory, then asks GitHub for the issue and PR
+    state. Any uncertainty fails closed: the decision is ``failed`` and the
+    reason is returned, never a confident completion.
+    """
+    result = {"issue": None, "branch": None, "pr": None}
+    metadata = root.parent / "sessions" / f"{worker}.json"
+    try:
+        session = json.loads(metadata.read_text())
+        result["issue"] = session["issue"]
+        result["branch"] = session["branch"]
+    except Exception as error:
+        return {**result, "decision": "failed",
+                "reason": f"session metadata unavailable: {error}"}
+    try:
+        issue_state = gh(["issue", "view", str(result["issue"]), "--json", "state"])["state"]
+    except Exception as error:
+        return {**result, "decision": "failed", "reason": f"issue state unknown: {error}"}
+    try:
+        pulls = gh(["pr", "list", "--head", result["branch"], "--state", "all",
+                    "--json", "state,url"])
+    except Exception as error:
+        return {**result, "decision": "failed", "reason": f"PR state unknown: {error}"}
+    if pulls:
+        result["pr"] = pulls[0].get("url")
+    merged = next((pull for pull in pulls if pull.get("state") == "MERGED"), None)
+    if issue_state == "CLOSED":
+        return {**result, "decision": "suppressed",
+                "reason": f"issue #{result['issue']} is closed"}
+    if merged:
+        result["pr"] = merged.get("url")
+        return {**result, "decision": "suppressed",
+                "reason": f"PR {merged.get('url')} is merged"}
+    return {**result, "decision": "delivered",
+            "reason": "issue open and no merged PR"}
+
+
 def save(path, state):
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(state, indent=2) + "\n")
     temporary.replace(path)
 
 
-def monitor(coordinator, worker, root, prompt=None, call=api, sleep=time.sleep):
+def append_record(root, worker, idle, outcome, decision):
+    """Append one delivery decision to the monitor's durable record."""
+    entry = {
+        "time": datetime.now(timezone.utc).isoformat(),
+        "worker": worker,
+        "issue": decision.get("issue"),
+        "branch": decision.get("branch"),
+        "pr": decision.get("pr"),
+        "idle": idle,
+        "outcome": outcome,
+        "decision": decision["decision"],
+        "reason": decision["reason"],
+    }
+    with (root / "deliveries.jsonl").open("a") as record:
+        record.write(json.dumps(entry, sort_keys=True) + "\n")
+
+
+def monitor(coordinator, worker, root, prompt=None, call=api, sleep=time.sleep, relevance=relevance):
     if coordinator == worker:
         raise ValueError("coordinator and worker must be different sessions")
     root.mkdir(parents=True, exist_ok=True)
@@ -63,22 +126,42 @@ def monitor(coordinator, worker, root, prompt=None, call=api, sleep=time.sleep):
                 if worker not in active and idle and idle != state.get("baseline"):
                     if idle == state.get("notified"):
                         return
+                    outcome = child.get("outcome", "unknown")
+                    try:
+                        decision = relevance(worker, root)
+                    except Exception as error:
+                        decision = {"decision": "failed", "reason": str(error),
+                                    "issue": None, "branch": None, "pr": None}
+                    if decision["decision"] != "delivered":
+                        append_record(root, worker, idle, outcome, decision)
+                        state.update(status=decision["decision"], reason=decision["reason"])
+                        save(path, state)
+                        return
                     state.update(status="delivering", event="msg_" + uuid.uuid4().hex)
                     save(path, state)
                     if paused.exists():
                         state["status"] = "paused"
                         save(path, state)
                         return
-                    call("post", f"/api/session/{coordinator}/prompt", {
-                        "id": state["event"], "delivery": "queue", "resume": True,
-                        "text": f"Factory completion: worker {worker} is idle (outcome: "
-                                f"{child.get('outcome', 'unknown')}). Inspect its results and "
-                                "GitHub before acting. Read docs/factory/completion-handoff.md "
-                                "for updated dispatch and resume instructions. Continue the already authorized queue: "
-                                "review, fix, check, merge when eligible, then dispatch. "
-                                "Respect any later stop request; do not duplicate workers. "
-                                "If blocked, report the specific human action needed."
-                    })
+                    try:
+                        call("post", f"/api/session/{coordinator}/prompt", {
+                            "id": state["event"], "delivery": "queue", "resume": True,
+                            "text": f"Factory completion: worker {worker} is idle (outcome: "
+                                    f"{outcome}). Issue #{decision.get('issue')}, branch "
+                                    f"{decision.get('branch')}, PR {decision.get('pr') or 'none'}. "
+                                    "Inspect its results and GitHub before acting. Read "
+                                    "docs/factory/completion-handoff.md for updated dispatch and "
+                                    "resume instructions. Continue the already authorized queue: "
+                                    "review, fix, check, merge when eligible, then dispatch. "
+                                    "Respect any later stop request; do not duplicate workers. "
+                                    "If blocked, report the specific human action needed."
+                        })
+                    except Exception as error:
+                        append_record(root, worker, idle, outcome, {
+                            **decision, "decision": "failed",
+                            "reason": f"delivery failed: {error}"})
+                        raise
+                    append_record(root, worker, idle, outcome, decision)
                     state.update(status="notified", notified=idle)
                     save(path, state)
                     return

@@ -422,6 +422,26 @@ class FrontierTests(unittest.TestCase):
                     self.assertEqual(main(["--check", "2"]), 2)
                 self.assertIn("could not evaluate", error.getvalue().casefold())
 
+    def test_paginated_comment_entries_are_validated_on_complete_history(self):
+        limit = frontier["COMMENT_LIMIT"]
+        target = self.ticket | {"comments": [{"body": f"discussion {index}"} for index in range(limit)]}
+        malformed_entries = (None, {"body": None})
+        for malformed in malformed_entries:
+            with self.subTest(comment=malformed):
+                full_page = [{"body": f"discussion {index}"} for index in range(limit)]
+                full_page[0] = malformed
+                pages = [full_page]
+                error = StringIO()
+
+                def gh(*args):
+                    return json.dumps(target if args[0] == "issue" else pages)
+
+                with patch.dict(main.__globals__, {"fetch": lambda: [self.parent], "gh": gh}), \
+                     redirect_stderr(error), redirect_stdout(StringIO()):
+                    self.assertEqual(main(["--check", "2"]), 2)
+                self.assertIn("unexpected shape", error.getvalue().casefold())
+                self.assertNotIn("traceback", error.getvalue().casefold())
+
     def test_short_paginated_history_fails_closed(self):
         limit = frontier["COMMENT_LIMIT"]
         target = self.ticket | {"comments": [{"body": f"discussion {index}"} for index in range(limit)]}

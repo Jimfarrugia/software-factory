@@ -51,6 +51,30 @@ class FrontierTests(unittest.TestCase):
         self.assertTrue(verdict(exact_name, [self.parent])["dispatchable"])
         self.assertTrue(verdict(exact_parent, [self.parent])["dispatchable"])
 
+    def test_heading_closing_hashes_require_preceding_whitespace(self):
+        cases = (
+            ("Parent feature", True, "#1"),
+            ("Parent feature ###", True, "#1"),
+            ("Parent feature #", True, "#1"),
+            ("Parent feature#", False, "#1"),
+            ("Parent#", False, "#1"),
+            ("Parent ###", True, "#1"),
+            ("Blocked by", True, "None"),
+            ("Blocked by ###", True, "None"),
+            ("Blocked by #", True, "None"),
+            ("Blocked by#", False, "None"),
+        )
+        for heading, accepted, value in cases:
+            with self.subTest(heading=heading):
+                if heading.startswith("Parent"):
+                    body = f"### {heading}\n{value}\n### Blocked by\nNone"
+                else:
+                    body = f"### Parent feature\n#1\n### {heading}\n{value}"
+                result = verdict(self.ticket | {"body": body}, [self.parent])
+                self.assertEqual(result["dispatchable"], accepted)
+                if not accepted:
+                    self.assertTrue(result["reasons"])
+
     def test_missing_malformed_and_missing_issue_parents_fail_closed(self):
         for body, known in (("Blocked by: None", [self.parent]),
                             ("Parent: nope\nBlocked by: None", [self.parent]),
@@ -258,6 +282,31 @@ class FrontierTests(unittest.TestCase):
         self.assertEqual(result["url"], target["url"])
         self.assertEqual(result["title"], target["title"])
         self.assertEqual(calls[0][-1], frontier["ISSUE_FIELDS"])
+
+    def test_truncated_bulk_view_cannot_be_evaluated_in_any_mode(self):
+        full_view = [{}] * frontier["ISSUE_LIMIT"]
+        with patch.dict(main.__globals__, {"fetch": lambda: full_view}):
+            error = StringIO()
+            with redirect_stderr(error):
+                self.assertEqual(main(["--check", "2"]), 2)
+            self.assertIn("could not evaluate", error.getvalue())
+            for arguments in ([], ["--json"], ["--lint"]):
+                with self.subTest(arguments=arguments):
+                    self.assertEqual(run_main(arguments), 2)
+
+    def test_fallback_comments_still_detect_a_stale_claim(self):
+        target = self.ticket | {
+            "url": "https://example.invalid/issues/2",
+            "comments": ["<!-- factory-claim issue=2 session=x -->"],
+        }
+
+        def gh(*_args):
+            return json.dumps(target)
+
+        output = StringIO()
+        with patch.dict(main.__globals__, {"fetch": lambda: [self.parent], "gh": gh}), redirect_stdout(output):
+            self.assertEqual(main(["--check", "2"]), 1)
+        self.assertIn("claim", output.getvalue().casefold())
 
     def test_gate_exit_codes_and_infrastructure_failure(self):
         namespace = main.__globals__

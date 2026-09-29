@@ -9,6 +9,7 @@ import sys
 ACTIVE = {"factory:needs-triage", "factory:needs-spec", "factory:ready", "factory:human",
           "factory:running", "factory:blocked", "factory:review", "factory:wontfix"}
 ISSUE_FIELDS = "number,title,url,body,labels,state,blockedBy,parent,comments"
+ISSUE_LIMIT = 1000
 
 
 def labels(issue):
@@ -37,7 +38,7 @@ def field_text(body, name):
         heading = heading_pattern.match(line)
         if heading is None:
             continue
-        title = heading.group(2).strip().strip("#").strip().casefold()
+        title = re.sub(r"\s+#+\s*$", "", heading.group(2).strip()).strip().casefold()
         matches = title == name.casefold()
         if name.casefold() == "parent":
             matches = title in {"parent", "parent feature"}
@@ -166,7 +167,7 @@ def gh(*args):
 
 
 def fetch():
-    listing = json.loads(gh("issue", "list", "--state", "open", "--limit", "1000",
+    listing = json.loads(gh("issue", "list", "--state", "open", "--limit", str(ISSUE_LIMIT),
                             "--json", ISSUE_FIELDS))
     return listing
 
@@ -202,11 +203,12 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         issues = fetch()
+        if len(issues) == ISSUE_LIMIT:
+            raise ValueError(f"bulk issue listing reached the configured limit ({ISSUE_LIMIT}) and may be truncated")
         if args.check is not None:
             target = next((item for item in issues if item["number"] == args.check), None)
             if target is None:
                 target = json.loads(gh("issue", "view", str(args.check), "--json", ISSUE_FIELDS))
-                target["comments"] = []
             result = evaluate(target, issues)
             print("dispatchable" if result["dispatchable"] else "ineligible: " + "; ".join(result["reasons"]))
             return 0 if result["dispatchable"] else 1

@@ -31,9 +31,6 @@ def field_text(body, name):
             break
         if field.group(1).casefold() == name.casefold():
             flat_values.append(field.group(2).strip())
-    if flat_values:
-        return (flat_values[0], False) if len(flat_values) == 1 else (None, True)
-
     heading_pattern = re.compile(r"^(#{1,6})[ \t]+(.*)$")
     sections = []
     for index, line in enumerate(lines):
@@ -48,8 +45,11 @@ def field_text(body, name):
             end = next((position for position in range(index + 1, len(lines))
                         if heading_pattern.match(lines[position])), len(lines))
             sections.append("\n".join(lines[index + 1:end]).strip())
-    if sections:
-        return (sections[0], False) if len(sections) == 1 else (None, True)
+    declarations = flat_values + sections
+    if len(declarations) == 1:
+        return declarations[0], False
+    if declarations:
+        return None, True
     return None, False
 
 
@@ -87,8 +87,9 @@ def dispatch_verdict(ticket, issues):
         reasons.append(f"{text}; resolve by applying {resolve} (coordinator action)")
 
     active = labels_ & ACTIVE
-    if ticket.get("state", "OPEN").upper() != "OPEN" or "factory:type:implementation" not in labels_ or active != {"factory:ready"} or labels_ & {"factory:type:feature", "factory:type:decision"} or any(x.startswith("wayfinder:") for x in labels_):
-        fail("ticket must be open, implementation-only, and in exactly the ready state", "factory:ready")
+    types = {label for label in labels_ if label.startswith("factory:type:")}
+    if ticket.get("state", "OPEN").upper() != "OPEN" or types != {"factory:type:implementation"} or active != {"factory:ready"} or any(x.startswith("wayfinder:") for x in labels_):
+        fail("ticket must be open, have exactly one implementation type, and be in exactly the ready state", "factory:ready")
     parents, malformed_parent = parse_relationship(ticket, "parent", "Parent")
     if malformed_parent or len(parents) != 1:
         fail("parent is missing, malformed, or ambiguous", "factory:human")

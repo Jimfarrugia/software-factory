@@ -78,7 +78,7 @@ class FrontierTests(unittest.TestCase):
 
     def test_leading_flat_fields_win_over_later_example_content(self):
         body = ("Parent: #1\nBlocked by: None\n\nDescription.\n\n"
-                "```\nParent: #99\nBlocked by: #98\n```\n### Parent feature\n#97\n")
+                "```\nParent: #99\nBlocked by: #98\n```\n")
         self.assertTrue(self.check(self.ticket | {"body": body})["dispatchable"])
 
     def test_leading_parent_malformed_value_fails_closed(self):
@@ -107,6 +107,50 @@ class FrontierTests(unittest.TestCase):
         result = verdict(ticket, [self.parent])
         self.assertFalse(result["dispatchable"])
         self.assertTrue(any("parent" in reason.casefold() for reason in result["reasons"]))
+
+    def test_undeclared_or_ambiguous_relationships_never_dispatch(self):
+        missing = (
+            ("", {}),
+            ("Parent: #1", {}),
+            ("Blocked by: None", {}),
+            ("", {"parent": 1}),
+            ("", {"blockedBy": {"nodes": [{"number": 3}]}}),
+        )
+        for body, native in missing:
+            with self.subTest(body=body, native=native):
+                result = verdict(self.ticket | {"body": body, **native}, [self.parent, issue(3, state="CLOSED")])
+                self.assertFalse(result["dispatchable"])
+                self.assertTrue(result["reasons"])
+
+        ambiguous = (
+            ("Parent: #1\nParent: #1\nBlocked by: None", "parent"),
+            ("Parent: #1\nBlocked by: None\nBlocked by: #99", "blocker"),
+            ("### Parent\n#1\n### Parent feature\n#1\n### Blocked by\nNone", "parent"),
+            ("### Parent feature\n#1\n### Blocked by\nNone\n### Blocked by\n#99", "blocker"),
+            ("Parent: #1\n### Parent feature\n#99\n### Blocked by\nNone", "parent"),
+            ("Parent: #1\nBlocked by: None\n### Blocked by\n#99", "blocker"),
+        )
+        for body, relationship in ambiguous:
+            with self.subTest(body=body):
+                result = verdict(self.ticket | {"body": body}, [self.parent, issue(99)])
+                self.assertFalse(result["dispatchable"])
+                self.assertTrue(any(relationship in reason.casefold() for reason in result["reasons"]))
+
+        valid_native = self.ticket | {
+            "body": "", "parent": 1, "blockedBy": {"nodes": [{"number": 3}]}
+        }
+        self.assertTrue(verdict(valid_native, [self.parent, issue(3, state="CLOSED")])["dispatchable"])
+        self.assertTrue(self.check()["dispatchable"])
+
+    def test_multiple_type_labels_never_dispatch(self):
+        for extra in ("factory:type:other", "factory:type:feature", "factory:type:decision"):
+            with self.subTest(extra_type=extra):
+                ticket = self.ticket | {"labels": ["factory:type:implementation", extra, "factory:ready"]}
+                result = verdict(ticket, [self.parent])
+                self.assertFalse(result["dispatchable"])
+                self.assertTrue(result["reasons"])
+        no_type = self.ticket | {"labels": ["factory:ready"]}
+        self.assertFalse(verdict(no_type, [self.parent])["dispatchable"])
 
     def test_parent_type_approval_wayfinder_and_human(self):
         for parent in (issue(1, labels=["factory:type:decision"]),

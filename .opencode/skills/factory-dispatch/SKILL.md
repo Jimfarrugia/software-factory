@@ -61,7 +61,10 @@ duplicating them. Completion wakes the coordinator to continue the authorized
 queue. Attach observers to review and CI waits as well. Honor pause requests.
 
 After a worker opens a PR, replace `factory:running` with `factory:review` and
-launch `reviewer`. The coordinator may merge only after all required checks pass,
+launch `reviewer` in the background, as a worker is launched. A foreground review
+occupies the coordinator's turn and leaves the user unable to reach it, so
+continue with other work and act on the review's completion notification. The
+coordinator may merge only after all required checks pass,
 the independent review has no blocking findings, acceptance criteria are met,
 the PR is mergeable and not a draft, and no human decision or conversation is
 unresolved. Workers and reviewers never merge. On failure, preserve the branch

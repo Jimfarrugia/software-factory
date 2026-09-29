@@ -52,8 +52,11 @@ For every request to build or change software:
 5. Launch `worker` in the background with a complete packet: issue and feature
    URLs, acceptance criteria, resolved decisions, absolute worktree path,
    branch, allowed scope, required validation, and PR conventions.
-6. Use `reviewer` for independent review and move completed implementation
-   issues to `factory:review`. You may merge only when the PR is not a draft,
+6. Run `reviewer` in the background for independent review and move completed
+   implementation issues to `factory:review`. A foreground review occupies your
+   turn and leaves the user unable to reach you, so continue with other work and
+   act on the review's completion notification. You may merge only when the PR is
+   not a draft,
    every required GitHub check passes, the reviewer reports no blocking
    findings, acceptance criteria are met, there are no unresolved human
    decisions or conversations, and GitHub reports it mergeable. Use a normal

@@ -1,46 +1,68 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-command -v gh >/dev/null || { echo "error: gh is required" >&2; exit 1; }
-gh auth status >/dev/null
-
 print_state() {
   local heading=$1
   shift
   echo "## $heading"
   local output
-  output=$(gh issue list --state open "$@" --limit 100 \
+  if output=$(gh issue list --state open "$@" --limit 100 \
     --json number,title,url,labels,assignees \
-    --jq '.[] | "- [#\(.number) \(.title)](\(.url)) — labels: \([.labels[].name] | join(", ")); assignees: \(if (.assignees | length) == 0 then "none" else [.assignees[].login] | join(", ") end)"')
-  if [[ -n $output ]]; then
-    echo "$output"
+    --jq '.[] | "- [#\(.number) \(.title)](\(.url)) — labels: \([.labels[].name] | join(", ")); assignees: \(if (.assignees | length) == 0 then "none" else [.assignees[].login] | join(", ") end)"'); then
+    if [[ -n $output ]]; then
+      echo "$output"
+    else
+      echo "- None"
+    fi
   else
-    echo "- None"
+    echo "- Unable to evaluate (GitHub issue query failed)"
   fi
   echo
 }
 
-repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+print_frontier() {
+  echo "## Ready frontier candidates"
+  local output rendered
+  if output=$(scripts/factory-frontier --json); then
+    if rendered=$(printf '%s' "$output" | python3 -c 'import json, sys
+for item in json.load(sys.stdin):
+    status = "dispatchable" if item["dispatchable"] else "ineligible: " + "; ".join(item["reasons"])
+    print("- [#{} {}]({}) — {}".format(item["number"], item["title"], item["url"], status))' 2>/dev/null); then
+      if [[ -n $rendered ]]; then
+        echo "$rendered"
+      else
+        echo "- None"
+      fi
+    else
+      echo "- Unable to evaluate (frontier returned invalid JSON)"
+    fi
+  else
+    echo "- Unable to evaluate (factory-frontier failed)"
+  fi
+
+  echo
+  echo "### Label-state violations"
+  if output=$(scripts/factory-frontier --lint); then
+    if [[ -n $output ]]; then
+      while IFS= read -r line; do
+        printf -- '- %s\n' "$line"
+      done <<< "$output"
+    else
+      echo "- None"
+    fi
+  else
+    echo "- Unable to evaluate (factory-frontier lint failed)"
+  fi
+  echo
+}
+
+repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null) || repo="unavailable"
 echo "# Factory status — $repo"
 echo
-# Only implementation tickets can enter the worker frontier. Feature and
-# decision issues use type labels plus factory:spec-approved or factory:human.
-print_state "Ready frontier candidates" --label factory:ready --label factory:type:implementation
+print_frontier
 print_state "Running" --label factory:running
 print_state "Human queue" --label factory:human
 print_state "Review" --label factory:review
 print_state "Blocked" --label factory:blocked
-
-mislabeled=$(gh issue list --state open --label factory:ready --limit 100 \
-  --json number,title,url,labels \
-  --jq '.[] | select(([.labels[].name] | index("factory:type:implementation")) == null)
-    | "- [#\(.number) \(.title)](\(.url))"')
-if [[ -n $mislabeled ]]; then
-  echo "## Mislabeled factory:ready issues"
-  echo "$mislabeled"
-  echo
-  echo "State labels belong to implementation tickets. Remove factory:ready and use the type-appropriate state."
-  echo
-fi
 
 echo "This is a queue snapshot. The coordinator must still verify parent specs, blockers, claims, worktrees, sessions, and PRs."

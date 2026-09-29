@@ -375,7 +375,7 @@ class FrontierTests(unittest.TestCase):
     def test_malformed_paginated_comments_fail_closed(self):
         limit = frontier["COMMENT_LIMIT"]
         target = self.ticket | {"comments": [{"body": f"discussion {index}"} for index in range(limit)]}
-        for response in ({}, ["x"], [None], None):
+        for response in ({}, ["x"], [None], [["not a comment"]], [[{"body": None}]], None):
             with self.subTest(response=response):
                 error = StringIO()
 
@@ -385,6 +385,30 @@ class FrontierTests(unittest.TestCase):
                 with patch.dict(main.__globals__, {"fetch": lambda: [self.parent], "gh": gh}), redirect_stderr(error):
                     self.assertEqual(main(["--check", "2"]), 2)
                 self.assertIn("could not evaluate", error.getvalue().casefold())
+
+    def test_short_paginated_history_fails_closed(self):
+        limit = frontier["COMMENT_LIMIT"]
+        target = self.ticket | {"comments": [{"body": f"discussion {index}"} for index in range(limit)]}
+        short_pages = [[{"body": f"discussion {index}"} for index in range(limit - 1)]]
+        error = StringIO()
+
+        def gh(*args):
+            return json.dumps(target if args[0] == "issue" else short_pages)
+
+        with patch.dict(main.__globals__, {"fetch": lambda: [self.parent], "gh": gh}), redirect_stderr(error):
+            self.assertEqual(main(["--check", "2"]), 2)
+        self.assertIn("shorter than the capped list", error.getvalue().casefold())
+
+    def test_malformed_capped_comment_field_fails_closed(self):
+        target = self.ticket | {"comments": {str(index): "not a comment object" for index in range(frontier["COMMENT_LIMIT"])}}
+        error = StringIO()
+
+        def gh(*args):
+            return json.dumps(target)
+
+        with patch.dict(main.__globals__, {"fetch": lambda: [self.parent], "gh": gh}), redirect_stderr(error):
+            self.assertEqual(main(["--check", "2"]), 2)
+        self.assertIn("issue comments response had an unexpected shape", error.getvalue().casefold())
 
     def test_failed_paginated_comment_request_fails_closed(self):
         limit = frontier["COMMENT_LIMIT"]

@@ -25,3 +25,11 @@ review cycles of heuristic block detection each produced a new defect, while
 this anchored contract is smaller and total. The accepted residual is that a
 fenced example whose content begins with a known heading at column 0 can still
 satisfy the section form.
+
+## ADR-0004: Complete capped comment history
+
+The `gh` issue comments field was verified to return at most the oldest 100
+comments. That cap is only a trigger: when reached, `factory-frontier` paginates
+the REST comments endpoint and checks the complete history before making a stale-
+claim decision. If the CLI field cap changes, re-probe and update the trigger;
+keep paginated retrieval so no deliberate comment-history ceiling remains.

@@ -10,6 +10,9 @@ ACTIVE = {"factory:needs-triage", "factory:needs-spec", "factory:ready", "factor
           "factory:running", "factory:blocked", "factory:review", "factory:wontfix"}
 ISSUE_FIELDS = "number,title,url,body,labels,state,blockedBy,parent,comments"
 ISSUE_LIMIT = 1000
+# ponytail: `gh`'s comments ceiling is verified at 100; re-probe and update this
+# trigger if it changes, keeping REST pagination for the complete history.
+COMMENT_LIMIT = 100
 
 
 def labels(issue):
@@ -186,6 +189,11 @@ def enrich(issue, issues):
             raise
         issues.append(related)
         by_number[number] = related
+    comments = issue.get("comments") or []
+    if len(comments) >= COMMENT_LIMIT:
+        pages = json.loads(gh("api", "--paginate", "--slurp",
+                              f"repos/{{owner}}/{{repo}}/issues/{issue['number']}/comments"))
+        issue["comments"] = comments + [comment for page in pages for comment in page]
 
 
 def evaluate(issue, issues):

@@ -308,6 +308,66 @@ class FrontierTests(unittest.TestCase):
             self.assertEqual(main(["--check", "2"]), 1)
         self.assertIn("claim", output.getvalue().casefold())
 
+    def test_capped_comments_are_completed_before_stale_claim_verdict(self):
+        limit = frontier["COMMENT_LIMIT"]
+        ticket = self.ticket | {"comments": [{"body": f"discussion {index}"} for index in range(limit)]}
+        full_history = ticket["comments"] + [{"body": "<!-- factory-claim issue=2 session=old -->"}]
+        pages = [full_history[index:index + 30] for index in range(0, len(full_history), 30)]
+        calls = []
+
+        def gh(*args):
+            calls.append(args)
+            return json.dumps(pages)
+
+        with patch.dict(main.__globals__, {"gh": gh}):
+            result = frontier["evaluate"](ticket, [self.parent, ticket])
+        self.assertFalse(result["dispatchable"])
+        self.assertTrue(any("claim" in reason.casefold() for reason in result["reasons"]))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][:3], ("api", "--paginate", "--slurp"))
+        self.assertEqual(calls[0][-1], "repos/{owner}/{repo}/issues/2/comments")
+
+    def test_capped_comments_without_claim_remain_dispatchable(self):
+        limit = frontier["COMMENT_LIMIT"]
+        ticket = self.ticket | {"comments": [{"body": f"discussion {index}"} for index in range(limit)]}
+
+        def gh(*_args):
+            return json.dumps([[{"body": f"discussion {index}"} for index in range(limit)]])
+
+        with patch.dict(main.__globals__, {"gh": gh}):
+            result = frontier["evaluate"](ticket, [self.parent, ticket])
+        self.assertTrue(result["dispatchable"])
+
+    def test_comment_followup_is_skipped_below_cap(self):
+        ticket = self.ticket | {"comments": [{"body": f"discussion {index}"} for index in range(frontier["COMMENT_LIMIT"] - 1)]}
+        calls = []
+
+        def gh(*args):
+            calls.append(args)
+            raise AssertionError("uncapped comments must not trigger another request")
+
+        with patch.dict(main.__globals__, {"gh": gh}):
+            result = frontier["evaluate"](ticket, [self.parent, ticket])
+        self.assertTrue(result["dispatchable"])
+        self.assertEqual(calls, [])
+
+    def test_capped_fallback_comments_complete_stale_claim_history(self):
+        limit = frontier["COMMENT_LIMIT"]
+        target = self.ticket | {"comments": [{"body": f"discussion {index}"} for index in range(limit)]}
+        calls = []
+
+        def gh(*args):
+            calls.append(args)
+            if args[0] == "issue":
+                return json.dumps(target)
+            return json.dumps([[{"body": "<!-- factory-claim issue=2 session=old -->"}]])
+
+        output = StringIO()
+        with patch.dict(main.__globals__, {"fetch": lambda: [self.parent], "gh": gh}), redirect_stdout(output):
+            self.assertEqual(main(["--check", "2"]), 1)
+        self.assertIn("claim", output.getvalue().casefold())
+        self.assertEqual([call[0] for call in calls], ["issue", "api"])
+
     def test_gate_exit_codes_and_infrastructure_failure(self):
         namespace = main.__globals__
         with patch.dict(namespace, {"fetch": lambda: [self.parent, self.ticket],

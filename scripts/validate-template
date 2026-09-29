@@ -97,6 +97,7 @@ grep -q -- 'scripts/factory-frontier' scripts/factory-status
 git diff --check
 shellcheck scripts/factory-setup scripts/factory-start-worker scripts/factory-status scripts/validate-template
 python3 scripts/test-frontier.py
+python3 scripts/test-status.py
 
 echo "Template validation passed."
 python3 scripts/test-handoff.py

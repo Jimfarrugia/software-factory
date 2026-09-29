@@ -27,7 +27,7 @@ print_frontier() {
     if rendered=$(printf '%s' "$output" | python3 -c 'import json, sys
 for item in json.load(sys.stdin):
     status = "dispatchable" if item["dispatchable"] else "ineligible: " + "; ".join(item["reasons"])
-    print("- [#{} {}]({}) — {}".format(item["number"], item["title"], item["url"], status))'); then
+    print("- [#{} {}]({}) — {}".format(item["number"], item["title"], item["url"], status))' 2>/dev/null); then
       if [[ -n $rendered ]]; then
         echo "$rendered"
       else

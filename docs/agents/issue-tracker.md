@@ -19,9 +19,11 @@ trying `gh pr view <number>` and then `gh issue view <number>`.
 ## Relationships
 
 Feature specs are parent issues. Implementation and decision issue bodies link
-their parent using `Parent: #<number>`. Prefer GitHub native sub-issues and
-dependencies when available. Otherwise, use the body conventions and verify
-referenced issue states before dispatch.
+their parent using `Parent: #<number>`, with parent and blocker fields in the
+body's leading lines. Each begins at column 0; blank lines may separate fields.
+Issue-template sections are read from a column-0 heading. Prefer GitHub native
+sub-issues and dependencies when available. Otherwise, use the body conventions
+and verify referenced issue states before dispatch.
 
 - Native sub-issue API: `POST repos/{owner}/{repo}/issues/{parent}/sub_issues`
   with the child issue database ID.

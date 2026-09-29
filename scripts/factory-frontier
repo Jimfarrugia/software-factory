@@ -1,0 +1,312 @@
+#!/usr/bin/env python3
+"""Report or check dispatch eligibility for implementation issues."""
+import argparse
+import json
+import re
+import subprocess
+import sys
+
+ACTIVE = {"factory:needs-triage", "factory:needs-spec", "factory:ready", "factory:human",
+          "factory:running", "factory:blocked", "factory:review", "factory:wontfix"}
+ISSUE_FIELDS = "number,title,url,body,labels,state,blockedBy,parent,comments"
+ISSUE_LIMIT = 1000
+# ponytail: `gh`'s comments ceiling is verified at 100; re-probe and update this
+# trigger if it changes, keeping REST pagination for the complete history.
+COMMENT_LIMIT = 100
+CLAIM_COMMENT = re.compile(
+    r"\s*<!--\s*factory-claim\s+issue=\d+\s+session=\S+\s+branch=\S+\s+"
+    r"worktree=.+?\s+claimed-at=\S+\s*-->\s*", re.DOTALL)
+
+
+def labels(issue):
+    return {item["name"] if isinstance(item, dict) else item for item in issue.get("labels", [])}
+
+
+def validate_issue_record(issue):
+    if not isinstance(issue, dict):
+        raise ValueError("issue record is not an object")
+    required = ("number", "title", "url", "body", "labels", "state", "comments", "parent", "blockedBy")
+    if any(field not in issue for field in required):
+        raise ValueError("issue record is missing a required field")
+    number = issue["number"]
+    if not isinstance(number, int) or isinstance(number, bool) or number < 1:
+        raise ValueError("issue record has an invalid number")
+    if not isinstance(issue["title"], str) or not isinstance(issue["url"], str):
+        raise ValueError("issue record has invalid title or url")
+    body = issue.get("body")
+    if body is not None and not isinstance(body, str):
+        raise ValueError("issue record has an invalid body")
+    if not isinstance(issue["state"], str) or issue["state"].upper() not in {"OPEN", "CLOSED"}:
+        raise ValueError("issue record has an invalid state")
+    labels_ = issue["labels"]
+    if not isinstance(labels_, list) or any(
+            not isinstance(label, str) and not (isinstance(label, dict) and isinstance(label.get("name"), str))
+            for label in labels_):
+        raise ValueError("issue record has invalid labels")
+    comments = issue["comments"]
+    if not isinstance(comments, list) or any(
+            not isinstance(comment, dict) or not isinstance(comment.get("body"), str)
+            for comment in comments):
+        raise ValueError("issue record has invalid comments")
+    parent = issue["parent"]
+    if parent is not None:
+        parent_number = parent.get("number") if isinstance(parent, dict) else parent
+        if not isinstance(parent_number, int) or isinstance(parent_number, bool) or parent_number < 1:
+            raise ValueError("issue record has an invalid parent")
+    blocked_by = issue["blockedBy"]
+    if not isinstance(blocked_by, dict) or not isinstance(blocked_by.get("nodes"), list):
+        raise ValueError("issue record has invalid blockedBy relationships")
+    if any(not isinstance(node, dict) or not isinstance(node.get("number"), int)
+           or isinstance(node.get("number"), bool) or node["number"] < 1
+           for node in blocked_by["nodes"]):
+        raise ValueError("issue record has invalid blockedBy relationships")
+    return issue
+
+
+def validate_issue_list(issues):
+    if not isinstance(issues, list):
+        raise ValueError("bulk issue listing is not a list")
+    return [validate_issue_record(issue) for issue in issues]
+
+
+def references(text):
+    return {int(number) for number in re.findall(r"(?<![\w])#(\d+)\b", text or "")}
+
+
+def field_text(body, name):
+    lines = (body or "").splitlines()
+    field_pattern = re.compile(r"^(Parent|Blocked by):(.*)$", re.IGNORECASE)
+    flat_values = []
+    for line in lines:
+        if not line.strip():
+            continue
+        field = field_pattern.match(line)
+        if field is None:
+            break
+        if field.group(1).casefold() == name.casefold():
+            flat_values.append(field.group(2).strip())
+    heading_pattern = re.compile(r"^(#{1,6})[ \t]+(.*)$")
+    sections = []
+    for index, line in enumerate(lines):
+        heading = heading_pattern.match(line)
+        if heading is None:
+            continue
+        title = re.sub(r"\s+#+\s*$", "", heading.group(2).strip()).strip().casefold()
+        matches = title == name.casefold()
+        if name.casefold() == "parent":
+            matches = title in {"parent", "parent feature"}
+        if matches:
+            end = next((position for position in range(index + 1, len(lines))
+                        if heading_pattern.match(lines[position])), len(lines))
+            sections.append("\n".join(lines[index + 1:end]).strip())
+    declarations = flat_values + sections
+    if len(declarations) == 1:
+        return declarations[0], False
+    if declarations:
+        return None, True
+    return None, False
+
+
+def parse_relationship(issue, key, field):
+    native = issue.get(key)
+    if key == "blocked_by":
+        native = issue.get("blocked_by", issue.get("blockedBy", native))
+        if isinstance(native, dict):
+            native = native.get("nodes", [])
+        native_ids = {int(value.get("number", value) if isinstance(value, dict) else value)
+                      for value in (native or [])}
+    else:
+        native_ids = set()
+    if key == "parent" and native is not None:
+        native_ids = {int(native.get("number", native) if isinstance(native, dict) else native)}
+    text, duplicate = field_text(issue.get("body", ""), field)
+    if duplicate:
+        return native_ids, True
+    if text is None:
+        return native_ids, not native_ids
+    if key == "blocked_by" and text.strip().casefold() == "none":
+        return native_ids, False
+    refs = references(text)
+    residue = re.sub(r"#\d+", "", text).strip(" \t\r\n,;:.-")
+    malformed = not refs or bool(residue)
+    return native_ids | refs, malformed
+
+
+def dispatch_verdict(ticket, issues):
+    by_number = {int(item["number"]): item for item in issues}
+    labels_ = labels(ticket)
+    reasons = []
+
+    def fail(text, resolve):
+        reasons.append(f"{text}; resolve by applying {resolve} (coordinator action)")
+
+    active = labels_ & ACTIVE
+    types = {label for label in labels_ if label.startswith("factory:type:")}
+    if ticket.get("state", "OPEN").upper() != "OPEN" or types != {"factory:type:implementation"} or active != {"factory:ready"} or any(x.startswith("wayfinder:") for x in labels_):
+        fail("ticket must be open, have exactly one implementation type, and be in exactly the ready state", "factory:ready")
+    parents, malformed_parent = parse_relationship(ticket, "parent", "Parent")
+    if malformed_parent or len(parents) != 1:
+        fail("parent is missing, malformed, or ambiguous", "factory:human")
+        parent = None
+    else:
+        parent = by_number.get(next(iter(parents)))
+        if parent is None:
+            fail("parent issue could not be resolved", "factory:human")
+    if parent is not None:
+        parent_labels = labels(parent)
+        if "factory:type:feature" not in parent_labels or "factory:spec-approved" not in parent_labels or any(x.startswith("wayfinder:") for x in parent_labels):
+            fail("parent must be an approved feature, not a Wayfinder map", "factory:human")
+
+    blockers, malformed_blockers = parse_relationship(ticket, "blocked_by", "Blocked by")
+    if malformed_blockers:
+        fail("blocker list is missing or malformed", "factory:human")
+    for number in sorted(blockers):
+        blocker = by_number.get(number)
+        if blocker is None:
+            fail(f"blocker #{number} could not be resolved", "factory:human")
+        elif blocker.get("state", "OPEN").upper() != "CLOSED":
+            fail(f"blocker #{number} is not closed", "factory:blocked")
+
+    if parent is not None:
+        if "factory:human" in labels(parent):
+            fail("parent has unresolved human input", "factory:ready")
+        if any(item.get("state", "OPEN").upper() == "OPEN"
+               and "factory:type:decision" in labels(item)
+               and not parse_relationship(item, "parent", "Parent")[1]
+               and parse_relationship(item, "parent", "Parent")[0] & {int(parent["number"])}
+               for item in issues):
+            fail("an open decision ticket remains for the parent", "factory:human")
+    if "factory:ready" in labels_ and any(
+            isinstance(comment, dict) and isinstance(comment.get("body"), str)
+            and CLAIM_COMMENT.fullmatch(comment["body"])
+            for comment in ticket.get("comments", [])):
+        fail("ticket has a stale factory claim while still ready", "factory:running")
+    return {"number": int(ticket["number"]), "title": ticket.get("title"), "url": ticket.get("url"),
+            "dispatchable": not reasons, "reasons": reasons}
+
+
+def lint_issues(issues):
+    messages = []
+    for item in issues:
+        if item.get("state", "OPEN").upper() != "OPEN":
+            continue
+        current = labels(item)
+        types = {label for label in current if label.startswith("factory:type:")}
+        active = current & ACTIVE
+        number = item["number"]
+        if len(types) != 1:
+            messages.append(f"#{number}: exactly one factory:type label is required")
+        if len(active) > 1:
+            messages.append(f"#{number}: at most one active state label is allowed")
+        if "factory:ready" in current and "factory:type:implementation" not in current:
+            messages.append(f"#{number}: factory:ready requires factory:type:implementation")
+        if "factory:type:feature" in current and current & {"factory:ready", "factory:running", "factory:review"}:
+            messages.append(f"#{number}: feature cannot carry ready, running, or review")
+        if "factory:type:decision" in current and "factory:ready" in current:
+            messages.append(f"#{number}: decision cannot carry factory:ready")
+    blockers = set()
+    for item in issues:
+        if item.get("state", "OPEN").upper() != "OPEN":
+            continue
+        refs, malformed = parse_relationship(item, "blocked_by", "Blocked by")
+        if not malformed:
+            blockers.update(refs)
+    for item in issues:
+        if item.get("state", "OPEN").upper() == "OPEN" and "factory:wontfix" in labels(item) and int(item["number"]) in blockers:
+            messages.append(f"#{item['number']}: open factory:wontfix issue is referenced as a blocker")
+    return messages
+
+
+def gh(*args):
+    result = subprocess.run(["gh", *args], check=True, capture_output=True, text=True)
+    return result.stdout
+
+
+def fetch():
+    listing = json.loads(gh("issue", "list", "--state", "open", "--limit", str(ISSUE_LIMIT),
+                            "--json", ISSUE_FIELDS))
+    return listing
+
+
+def enrich(issue, issues):
+    """Read absent relationships individually; open issue data comes from the bulk listing."""
+    parent_refs, _ = parse_relationship(issue, "parent", "Parent")
+    blocker_refs, _ = parse_relationship(issue, "blocked_by", "Blocked by")
+    by_number = {int(item["number"]): item for item in issues}
+    for number in sorted((parent_refs | blocker_refs) - by_number.keys()):
+        try:
+            related = validate_issue_record(json.loads(gh("issue", "view", str(number), "--json", ISSUE_FIELDS)))
+        except subprocess.CalledProcessError as error:
+            if "not found" in (error.stderr or "").casefold() or "could not resolve to an issue" in (error.stderr or "").casefold():
+                continue
+            raise
+        issues.append(related)
+        by_number[number] = related
+    comments = issue["comments"]
+    if len(comments) >= COMMENT_LIMIT:
+        pages = json.loads(gh("api", "--paginate", "--slurp",
+                              f"repos/{{owner}}/{{repo}}/issues/{issue['number']}/comments"))
+        if not isinstance(pages, list) or any(not isinstance(page, list) for page in pages):
+            raise ValueError("paginated issue comments response had an unexpected shape")
+        if any(not isinstance(comment, dict) or not isinstance(comment.get("body"), str)
+               for page in pages for comment in page):
+            raise ValueError("paginated issue comments response had an unexpected shape")
+        full_comments = [comment for page in pages for comment in page]
+        if len(full_comments) < len(comments):
+            raise ValueError("paginated issue comments response was shorter than the capped list")
+        issue["comments"] = comments + full_comments
+
+
+def evaluate(issue, issues):
+    enrich(issue, issues)
+    return dispatch_verdict(issue, issues)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__ + " Exit 1 from --check is an expected ineligible outcome, not an error.")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--check", type=int, metavar="N", help="gate one issue (0 eligible, 1 ineligible, 2 unable to evaluate)")
+    group.add_argument("--lint", action="store_true", help="report documented label invariant violations")
+    group.add_argument("--json", action="store_true", help="emit JSON verdicts")
+    parser.add_argument("issues", nargs="*", type=int, help="report selected issue numbers; bare mode lists ready candidates")
+    args = parser.parse_args(argv)
+    try:
+        issues = validate_issue_list(fetch())
+        if len(issues) == ISSUE_LIMIT:
+            raise ValueError(f"bulk issue listing reached the configured limit ({ISSUE_LIMIT}) and may be truncated")
+        if args.check is not None:
+            target = next((item for item in issues if item["number"] == args.check), None)
+            if target is None:
+                target = validate_issue_record(json.loads(gh("issue", "view", str(args.check), "--json", ISSUE_FIELDS)))
+            result = evaluate(target, issues)
+            print("dispatchable" if result["dispatchable"] else "ineligible: " + "; ".join(result["reasons"]))
+            return 0 if result["dispatchable"] else 1
+        if args.lint:
+            for message in lint_issues(issues):
+                print(message)
+            return 0
+        if args.issues:
+            selected = []
+            for number in args.issues:
+                item = next((candidate for candidate in issues if candidate["number"] == number), None)
+                if item is None:
+                    item = validate_issue_record(json.loads(gh("issue", "view", str(number), "--json", ISSUE_FIELDS)))
+                    issues.append(item)
+                selected.append(item)
+        else:
+            selected = [item for item in issues if "factory:ready" in labels(item)]
+        results = [evaluate(item, issues) for item in selected]
+        if args.json:
+            print(json.dumps(results))
+        else:
+            for result in results:
+                print(f"#{result['number']}: {'dispatchable' if result['dispatchable'] else 'ineligible'}" + (" — " + "; ".join(result["reasons"]) if result["reasons"] else ""))
+        return 0
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError, KeyError, ValueError) as error:
+        detail = error.stderr.strip() if isinstance(error, subprocess.CalledProcessError) and error.stderr else str(error)
+        print(f"error: could not evaluate dispatch eligibility: {detail}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

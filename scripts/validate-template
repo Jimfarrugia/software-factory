@@ -17,6 +17,8 @@ required=(
   .opencode/skills/factory-dispatch/SKILL.md
   .opencode/skills/factory-status/SKILL.md
   scripts/factory-start-worker
+  scripts/factory-frontier
+  docs/DECISIONS.md
   docs/agents/issue-tracker.md
   docs/factory/workflow.md
 )
@@ -94,6 +96,7 @@ grep -q "model: {providerID: \"openai\", id: \"$model_id\", variant: \"high\"}" 
 grep -q -- '--label factory:ready --label factory:type:implementation' scripts/factory-status
 git diff --check
 shellcheck scripts/factory-setup scripts/factory-start-worker scripts/factory-status scripts/validate-template
+python3 scripts/test-frontier.py
 
 echo "Template validation passed."
 python3 scripts/test-handoff.py

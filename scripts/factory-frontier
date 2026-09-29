@@ -22,6 +22,52 @@ def labels(issue):
     return {item["name"] if isinstance(item, dict) else item for item in issue.get("labels", [])}
 
 
+def validate_issue_record(issue):
+    if not isinstance(issue, dict):
+        raise ValueError("issue record is not an object")
+    required = ("number", "title", "url", "body", "labels", "state", "comments", "parent", "blockedBy")
+    if any(field not in issue for field in required):
+        raise ValueError("issue record is missing a required field")
+    number = issue["number"]
+    if not isinstance(number, int) or isinstance(number, bool) or number < 1:
+        raise ValueError("issue record has an invalid number")
+    if not isinstance(issue["title"], str) or not isinstance(issue["url"], str):
+        raise ValueError("issue record has invalid title or url")
+    if issue["body"] is not None and not isinstance(issue["body"], str):
+        raise ValueError("issue record has an invalid body")
+    if not isinstance(issue["state"], str) or issue["state"].upper() not in {"OPEN", "CLOSED"}:
+        raise ValueError("issue record has an invalid state")
+    labels_ = issue["labels"]
+    if not isinstance(labels_, list) or any(
+            not isinstance(label, str) and not (isinstance(label, dict) and isinstance(label.get("name"), str))
+            for label in labels_):
+        raise ValueError("issue record has invalid labels")
+    comments = issue["comments"]
+    if not isinstance(comments, list) or any(
+            not isinstance(comment, dict) or not isinstance(comment.get("body"), str)
+            for comment in comments):
+        raise ValueError("issue record has invalid comments")
+    parent = issue["parent"]
+    if parent is not None:
+        parent_number = parent.get("number") if isinstance(parent, dict) else parent
+        if not isinstance(parent_number, int) or isinstance(parent_number, bool) or parent_number < 1:
+            raise ValueError("issue record has an invalid parent")
+    blocked_by = issue["blockedBy"]
+    if not isinstance(blocked_by, dict) or not isinstance(blocked_by.get("nodes"), list):
+        raise ValueError("issue record has invalid blockedBy relationships")
+    if any(not isinstance(node, dict) or not isinstance(node.get("number"), int)
+           or isinstance(node.get("number"), bool) or node["number"] < 1
+           for node in blocked_by["nodes"]):
+        raise ValueError("issue record has invalid blockedBy relationships")
+    return issue
+
+
+def validate_issue_list(issues):
+    if not isinstance(issues, list):
+        raise ValueError("bulk issue listing is not a list")
+    return [validate_issue_record(issue) for issue in issues]
+
+
 def references(text):
     return {int(number) for number in re.findall(r"(?<![\w])#(\d+)\b", text or "")}
 
@@ -188,18 +234,14 @@ def enrich(issue, issues):
     by_number = {int(item["number"]): item for item in issues}
     for number in sorted((parent_refs | blocker_refs) - by_number.keys()):
         try:
-            related = json.loads(gh("issue", "view", str(number), "--json", ISSUE_FIELDS))
+            related = validate_issue_record(json.loads(gh("issue", "view", str(number), "--json", ISSUE_FIELDS)))
         except subprocess.CalledProcessError as error:
             if "not found" in (error.stderr or "").casefold() or "could not resolve to an issue" in (error.stderr or "").casefold():
                 continue
             raise
         issues.append(related)
         by_number[number] = related
-    comments = issue.get("comments") or []
-    if not isinstance(comments, list) or any(
-            not isinstance(comment, dict) or not isinstance(comment.get("body"), str)
-            for comment in comments):
-        raise ValueError("issue comments response had an unexpected shape")
+    comments = issue["comments"]
     if len(comments) >= COMMENT_LIMIT:
         pages = json.loads(gh("api", "--paginate", "--slurp",
                               f"repos/{{owner}}/{{repo}}/issues/{issue['number']}/comments"))
@@ -228,13 +270,13 @@ def main(argv=None):
     parser.add_argument("issues", nargs="*", type=int, help="report selected issue numbers; bare mode lists ready candidates")
     args = parser.parse_args(argv)
     try:
-        issues = fetch()
+        issues = validate_issue_list(fetch())
         if len(issues) == ISSUE_LIMIT:
             raise ValueError(f"bulk issue listing reached the configured limit ({ISSUE_LIMIT}) and may be truncated")
         if args.check is not None:
             target = next((item for item in issues if item["number"] == args.check), None)
             if target is None:
-                target = json.loads(gh("issue", "view", str(args.check), "--json", ISSUE_FIELDS))
+                target = validate_issue_record(json.loads(gh("issue", "view", str(args.check), "--json", ISSUE_FIELDS)))
             result = evaluate(target, issues)
             print("dispatchable" if result["dispatchable"] else "ineligible: " + "; ".join(result["reasons"]))
             return 0 if result["dispatchable"] else 1
@@ -247,7 +289,7 @@ def main(argv=None):
             for number in args.issues:
                 item = next((candidate for candidate in issues if candidate["number"] == number), None)
                 if item is None:
-                    item = json.loads(gh("issue", "view", str(number), "--json", ISSUE_FIELDS))
+                    item = validate_issue_record(json.loads(gh("issue", "view", str(number), "--json", ISSUE_FIELDS)))
                     issues.append(item)
                 selected.append(item)
         else:

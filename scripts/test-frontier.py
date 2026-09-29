@@ -15,8 +15,10 @@ CLAIM = "<!-- factory-claim issue=2 session=ses_test branch=factory/2-test workt
 
 
 def issue(number, body="", labels=(), state="OPEN", **extra):
-    return {"number": number, "body": body, "labels": list(labels), "state": state,
-            "title": f"Issue {number}", **extra}
+    return {"number": number, "title": f"Issue {number}",
+            "url": f"https://example.invalid/issues/{number}", "body": body,
+            "labels": list(labels), "state": state, "comments": [],
+            "parent": None, "blockedBy": {"nodes": []}, **extra}
 
 
 def run_main(arguments):
@@ -408,7 +410,65 @@ class FrontierTests(unittest.TestCase):
 
         with patch.dict(main.__globals__, {"fetch": lambda: [self.parent], "gh": gh}), redirect_stderr(error):
             self.assertEqual(main(["--check", "2"]), 2)
-        self.assertIn("issue comments response had an unexpected shape", error.getvalue().casefold())
+        self.assertIn("issue record has invalid comments", error.getvalue().casefold())
+
+    def test_malformed_bulk_issue_records_fail_closed(self):
+        missing_comments = self.ticket.copy()
+        del missing_comments["comments"]
+        malformed = (
+            missing_comments,
+            self.ticket | {"comments": None},
+            self.ticket | {"comments": "not a list"},
+            self.ticket | {"comments": {"body": CLAIM}},
+            self.ticket | {"comments": [None]},
+            self.ticket | {"comments": [{"body": None}]},
+            self.ticket | {"number": "2"},
+            self.ticket | {"state": None},
+            self.ticket | {"labels": None},
+            self.ticket | {"body": 2},
+        )
+        for bad_issue in malformed:
+            with self.subTest(record=bad_issue):
+                error = StringIO()
+                with patch.dict(main.__globals__, {"fetch": lambda: [self.parent, bad_issue]}), \
+                     redirect_stderr(error), redirect_stdout(StringIO()):
+                    self.assertEqual(main(["--check", "2"]), 2)
+                self.assertIn("could not evaluate", error.getvalue().casefold())
+                self.assertNotIn("traceback", error.getvalue().casefold())
+
+    def test_empty_comment_history_is_a_valid_dispatchable_record(self):
+        output = StringIO()
+
+        with patch.dict(main.__globals__, {"fetch": lambda: [self.parent, self.ticket]}), \
+             redirect_stdout(output):
+            self.assertEqual(main(["--check", "2"]), 0)
+        self.assertEqual(output.getvalue().strip(), "dispatchable")
+
+    def test_malformed_individually_fetched_records_fail_closed(self):
+        absent_batch_target = self.ticket.copy()
+        del absent_batch_target["comments"]
+        error = StringIO()
+
+        def gh(*_args):
+            return json.dumps(absent_batch_target)
+
+        with patch.dict(main.__globals__, {"fetch": lambda: [self.parent], "gh": gh}), \
+             redirect_stderr(error), redirect_stdout(StringIO()):
+            self.assertEqual(main(["--check", "2"]), 2)
+        self.assertIn("could not evaluate", error.getvalue().casefold())
+
+        ticket = self.ticket | {"body": "Parent: #1\nBlocked by: #3"}
+        absent_blocker_comments = issue(3, state="CLOSED")
+        del absent_blocker_comments["comments"]
+        error = StringIO()
+
+        def fetch_blocker(*_args):
+            return json.dumps(absent_blocker_comments)
+
+        with patch.dict(main.__globals__, {"fetch": lambda: [self.parent, ticket], "gh": fetch_blocker}), \
+             redirect_stderr(error), redirect_stdout(StringIO()):
+            self.assertEqual(main(["--check", "2"]), 2)
+        self.assertIn("could not evaluate", error.getvalue().casefold())
 
     def test_failed_paginated_comment_request_fails_closed(self):
         limit = frontier["COMMENT_LIMIT"]

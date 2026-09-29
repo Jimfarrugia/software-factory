@@ -34,6 +34,8 @@ class FrontierTests(unittest.TestCase):
 
     def test_dispatchable_flat_relationships(self):
         self.assertTrue(self.check()["dispatchable"])
+        with_blank = self.ticket | {"body": "Parent: #1\n\nBlocked by: None"}
+        self.assertTrue(self.check(with_blank)["dispatchable"])
 
     def test_template_sections_resolve_parent_and_blocker(self):
         blocker = issue(3, state="CLOSED")
@@ -50,27 +52,29 @@ class FrontierTests(unittest.TestCase):
                 self.assertFalse(result["dispatchable"])
                 self.assertTrue(result["reasons"])
 
-    def test_fenced_examples_and_prose_do_not_define_relationships(self):
-        fences = (
-            "Text\n\n```\nParent: #1\n",
-            "Text\n\n```\nParent: #1\n````\n",
-            "Text\r\n\r\n```\r\nParent: #1\r\n```\r\n",
-            "Text\n\n~~~\nParent: #1\n~~~\n",
-            "Text\n\n```python\nParent: #1\n```\n",
-            "Text\n\n    ```\nParent: #1\n    ```\n",
-        )
-        for body in (*fences, "See docs; the convention is Parent: #1 for children.\n"):
+    def assert_parent_ineligible(self, body):
+        result = verdict(self.ticket | {"body": body}, [self.parent])
+        self.assertFalse(result["dispatchable"])
+        self.assertTrue(any("parent" in reason.casefold() for reason in result["reasons"]))
+
+    def test_only_leading_column_zero_flat_fields_resolve(self):
+        for body in (
+            "    Parent: #1\nBlocked by: None",
+            "Description first.\nParent: #1\nBlocked by: None",
+            "## Introduction\nParent: #1\nBlocked by: None",
+            "```text\nParent: #1\nBlocked by: None\n```",
+            "See docs; the convention is Parent: #1 for children.\n",
+        ):
             with self.subTest(body=body):
-                refs, malformed = frontier["parse_relationship"](
-                    issue(2, body, ["factory:type:implementation", "factory:ready"]), "parent", "Parent")
-                self.assertEqual(refs, set())
-                self.assertTrue(malformed)
-        for body in fences:
-            with self.subTest(real_field_followed_by=body):
-                combined = "Parent: #1\nBlocked by: None\n\n" + body
-                refs, malformed = frontier["parse_relationship"](self.ticket | {"body": combined}, "parent", "Parent")
-                self.assertEqual(refs, {1})
-                self.assertFalse(malformed)
+                self.assert_parent_ineligible(body)
+
+    def test_leading_flat_fields_win_over_later_example_content(self):
+        body = ("Parent: #1\nBlocked by: None\n\nDescription.\n\n"
+                "```\nParent: #99\nBlocked by: #98\n```\n### Parent feature\n#97\n")
+        self.assertTrue(self.check(self.ticket | {"body": body})["dispatchable"])
+
+    def test_leading_parent_malformed_value_fails_closed(self):
+        self.assert_parent_ineligible("Parent: nope\nBlocked by: None")
 
     def test_parent_type_approval_wayfinder_and_human(self):
         for parent in (issue(1, labels=["factory:type:decision"]),

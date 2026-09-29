@@ -19,31 +19,30 @@ def references(text):
 
 
 def field_text(body, name):
-    visible = []
-    fence = None
-    fence_length = 0
-    for line in (body or "").splitlines():
-        stripped = line.strip()
-        if fence:
-            if stripped and set(stripped) == {fence} and len(stripped) >= fence_length:
-                fence = None
+    lines = (body or "").splitlines()
+    field_pattern = re.compile(r"^(Parent|Blocked by):(.*)$", re.IGNORECASE)
+    for line in lines:
+        if not line.strip():
             continue
-        opening = re.match(r"(`{3,}|~{3,})", stripped)
-        if opening:
-            fence = opening.group(1)[0]
-            fence_length = len(opening.group(1))
+        field = field_pattern.match(line)
+        if field is None:
+            break
+        if field.group(1).casefold() == name.casefold():
+            return field.group(2).strip()
+
+    heading_pattern = re.compile(r"^(#{1,6})[ \t]+(.*)$")
+    for index, line in enumerate(lines):
+        heading = heading_pattern.match(line)
+        if heading is None:
             continue
-        visible.append(line)
-    body = "\n".join(visible)
-    flat = re.search(rf"(?im)^\s*{re.escape(name)}\s*:\s*(.*?)\s*$", body or "")
-    if flat:
-        return flat.group(1)
-    sections = re.split(r"(?m)^#{1,6}\s+", body or "")
-    for section in sections[1:]:
-        heading, _, content = section.partition("\n")
-        heading = heading.strip().rstrip("#").strip().casefold()
-        if heading == name.casefold() or (name.casefold() == "parent" and heading.startswith("parent ")):
-            return content.strip()
+        title = heading.group(2).strip().rstrip("#").strip().casefold()
+        matches = title == name.casefold()
+        if name.casefold() == "parent":
+            matches = title == "parent" or title.startswith("parent feature")
+        if matches:
+            end = next((position for position in range(index + 1, len(lines))
+                        if heading_pattern.match(lines[position])), len(lines))
+            return "\n".join(lines[index + 1:end]).strip()
     return None
 
 

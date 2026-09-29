@@ -14,3 +14,14 @@ encoding until a migration is deliberately chosen. This diverges from
 `docs/agents/issue-tracker.md`, which prefers native relationships: nothing
 currently populates those relationships, while every existing ticket uses the
 body form.
+
+## ADR-0003: Positional relationship fields
+
+Relationship fields are recognised by position, not Markdown block analysis.
+Flat fields come only from the body's leading block at column 0, with blank
+lines permitted between fields; section fields come only from a column-0
+heading. Fenced- and indented-code detection is deliberately absent. Three
+review cycles of heuristic block detection each produced a new defect, while
+this anchored contract is smaller and total. The accepted residual is that a
+fenced example whose content begins with a known heading at column 0 can still
+satisfy the section form.

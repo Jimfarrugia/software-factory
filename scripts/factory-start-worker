@@ -39,7 +39,7 @@ create_payload=$(jq -n \
   '{
     title: $title,
     agent: "worker",
-    model: {providerID: "openai", id: "gpt-6-luna", variant: "high"},
+    model: {providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high"},
     location: {directory: $directory},
     metadata: {factoryIssue: $issue}
   }')

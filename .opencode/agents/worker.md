@@ -1,7 +1,7 @@
 ---
 description: Implements one approved GitHub issue in its assigned isolated worktree
 mode: subagent
-model: openai/gpt-6-luna#high
+model: opencode-go/deepseek-v4.1-flash#high
 color: "#2563EB"
 permissions:
   - action: subagent

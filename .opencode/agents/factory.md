@@ -1,7 +1,7 @@
 ---
 description: Plans product work, maintains the GitHub queue, and coordinates isolated workers
 mode: primary
-model: openai/gpt-6-luna#high
+model: opencode-go/deepseek-v4.1-flash#high
 color: "#7C3AED"
 permissions:
   - action: subagent

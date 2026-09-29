@@ -38,6 +38,12 @@ lock = json.loads(Path("upstream-lock.json").read_text())
 assert lock["schemaVersion"] == 1
 assert len(lock["sources"]) == 2
 
+# An unattended worker or reviewer has nobody to answer an approval prompt, so a
+# prompt is a stall. Nothing in this project may ask; allow the specific commands
+# the factory needs instead.
+asks = [rule for rule in config["permissions"] if rule.get("effect") == "ask"]
+assert not asks, f"opencode.jsonc declares ask effects: {asks}"
+
 def agent_permissions(path):
     frontmatter = Path(path).read_text().split("---", 2)[1]
     rules = []

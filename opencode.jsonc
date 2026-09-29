@@ -8,6 +8,21 @@
     "permissions": [
         {
             "action": "shell",
+            "resource": "rm -rf /tmp/opencode/*",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "rm -r /tmp/opencode/*",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "rm -f /tmp/opencode/*",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
             "resource": "gh pr merge *",
             "effect": "deny"
         },

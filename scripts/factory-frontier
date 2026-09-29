@@ -13,6 +13,9 @@ ISSUE_LIMIT = 1000
 # ponytail: `gh`'s comments ceiling is verified at 100; re-probe and update this
 # trigger if it changes, keeping REST pagination for the complete history.
 COMMENT_LIMIT = 100
+CLAIM_COMMENT = re.compile(
+    r"\s*<!--\s*factory-claim\s+issue=\d+\s+session=\S+\s+branch=\S+\s+"
+    r"worktree=.+?\s+claimed-at=\S+\s*-->\s*", re.DOTALL)
 
 
 def labels(issue):
@@ -126,7 +129,10 @@ def dispatch_verdict(ticket, issues):
                and parse_relationship(item, "parent", "Parent")[0] & {int(parent["number"])}
                for item in issues):
             fail("an open decision ticket remains for the parent", "factory:human")
-    if "factory:ready" in labels_ and any("factory-claim" in str(comment) for comment in ticket.get("comments", [])):
+    if "factory:ready" in labels_ and any(
+            isinstance(comment, dict) and isinstance(comment.get("body"), str)
+            and CLAIM_COMMENT.fullmatch(comment["body"])
+            for comment in ticket.get("comments", [])):
         fail("ticket has a stale factory claim while still ready", "factory:running")
     return {"number": int(ticket["number"]), "title": ticket.get("title"), "url": ticket.get("url"),
             "dispatchable": not reasons, "reasons": reasons}
@@ -190,10 +196,22 @@ def enrich(issue, issues):
         issues.append(related)
         by_number[number] = related
     comments = issue.get("comments") or []
+    if not isinstance(comments, list) or any(
+            not isinstance(comment, dict) or not isinstance(comment.get("body"), str)
+            for comment in comments):
+        raise ValueError("issue comments response had an unexpected shape")
     if len(comments) >= COMMENT_LIMIT:
         pages = json.loads(gh("api", "--paginate", "--slurp",
                               f"repos/{{owner}}/{{repo}}/issues/{issue['number']}/comments"))
-        issue["comments"] = comments + [comment for page in pages for comment in page]
+        if not isinstance(pages, list) or any(not isinstance(page, list) for page in pages):
+            raise ValueError("paginated issue comments response had an unexpected shape")
+        if any(not isinstance(comment, dict) or not isinstance(comment.get("body"), str)
+               for page in pages for comment in page):
+            raise ValueError("paginated issue comments response had an unexpected shape")
+        full_comments = [comment for page in pages for comment in page]
+        if len(full_comments) < len(comments):
+            raise ValueError("paginated issue comments response was shorter than the capped list")
+        issue["comments"] = comments + full_comments
 
 
 def evaluate(issue, issues):

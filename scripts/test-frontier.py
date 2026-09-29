@@ -11,6 +11,7 @@ frontier = runpy.run_path(str(Path(__file__).with_name("factory-frontier")))
 verdict = frontier["dispatch_verdict"]
 lint = frontier["lint_issues"]
 main = frontier["main"]
+CLAIM = "<!-- factory-claim issue=2 session=ses_test branch=factory/2-test worktree=/tmp/work claimed-at=2026-09-29T12:00:00Z -->"
 
 
 def issue(number, body="", labels=(), state="OPEN", **extra):
@@ -202,8 +203,10 @@ class FrontierTests(unittest.TestCase):
         self.assertTrue(verdict(native_only, [self.parent, issue(4, state="CLOSED")])["dispatchable"])
         decision = issue(3, "Parent: #1", ["factory:type:decision"])
         self.assertFalse(verdict(self.ticket, [self.parent, decision])["dispatchable"])
-        stale = self.ticket | {"comments": ["<!-- factory-claim issue=2 session=x -->"]}
+        stale = self.ticket | {"comments": [{"body": CLAIM}]}
         self.assertFalse(self.check(stale)["dispatchable"])
+        mentioned = self.ticket | {"comments": [{"body": "The factory-claim marker is discussed here, not posted."}]}
+        self.assertTrue(self.check(mentioned)["dispatchable"])
         unioned = self.ticket | {"blocked_by": [4]}
         self.assertFalse(verdict(unioned, [self.parent, issue(4)])["dispatchable"])
 
@@ -297,7 +300,7 @@ class FrontierTests(unittest.TestCase):
     def test_fallback_comments_still_detect_a_stale_claim(self):
         target = self.ticket | {
             "url": "https://example.invalid/issues/2",
-            "comments": ["<!-- factory-claim issue=2 session=x -->"],
+            "comments": [{"body": CLAIM}],
         }
 
         def gh(*_args):
@@ -311,7 +314,7 @@ class FrontierTests(unittest.TestCase):
     def test_capped_comments_are_completed_before_stale_claim_verdict(self):
         limit = frontier["COMMENT_LIMIT"]
         ticket = self.ticket | {"comments": [{"body": f"discussion {index}"} for index in range(limit)]}
-        full_history = ticket["comments"] + [{"body": "<!-- factory-claim issue=2 session=old -->"}]
+        full_history = ticket["comments"] + [{"body": CLAIM}]
         pages = [full_history[index:index + 30] for index in range(0, len(full_history), 30)]
         calls = []
 
@@ -354,19 +357,48 @@ class FrontierTests(unittest.TestCase):
     def test_capped_fallback_comments_complete_stale_claim_history(self):
         limit = frontier["COMMENT_LIMIT"]
         target = self.ticket | {"comments": [{"body": f"discussion {index}"} for index in range(limit)]}
+        full_history = target["comments"] + [{"body": CLAIM}]
         calls = []
 
         def gh(*args):
             calls.append(args)
             if args[0] == "issue":
                 return json.dumps(target)
-            return json.dumps([[{"body": "<!-- factory-claim issue=2 session=old -->"}]])
+            return json.dumps([full_history[index:index + 30] for index in range(0, len(full_history), 30)])
 
         output = StringIO()
         with patch.dict(main.__globals__, {"fetch": lambda: [self.parent], "gh": gh}), redirect_stdout(output):
             self.assertEqual(main(["--check", "2"]), 1)
         self.assertIn("claim", output.getvalue().casefold())
         self.assertEqual([call[0] for call in calls], ["issue", "api"])
+
+    def test_malformed_paginated_comments_fail_closed(self):
+        limit = frontier["COMMENT_LIMIT"]
+        target = self.ticket | {"comments": [{"body": f"discussion {index}"} for index in range(limit)]}
+        for response in ({}, ["x"], [None], None):
+            with self.subTest(response=response):
+                error = StringIO()
+
+                def gh(*args):
+                    return json.dumps(target if args[0] == "issue" else response)
+
+                with patch.dict(main.__globals__, {"fetch": lambda: [self.parent], "gh": gh}), redirect_stderr(error):
+                    self.assertEqual(main(["--check", "2"]), 2)
+                self.assertIn("could not evaluate", error.getvalue().casefold())
+
+    def test_failed_paginated_comment_request_fails_closed(self):
+        limit = frontier["COMMENT_LIMIT"]
+        target = self.ticket | {"comments": [{"body": f"discussion {index}"} for index in range(limit)]}
+        error = StringIO()
+
+        def gh(*args):
+            if args[0] == "issue":
+                return json.dumps(target)
+            raise frontier["subprocess"].CalledProcessError(1, args, stderr="HTTP 403 rate limit")
+
+        with patch.dict(main.__globals__, {"fetch": lambda: [self.parent], "gh": gh}), redirect_stderr(error):
+            self.assertEqual(main(["--check", "2"]), 2)
+        self.assertIn("could not evaluate", error.getvalue().casefold())
 
     def test_gate_exit_codes_and_infrastructure_failure(self):
         namespace = main.__globals__

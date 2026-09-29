@@ -43,6 +43,14 @@ class FrontierTests(unittest.TestCase):
                        ["factory:type:implementation", "factory:ready"])
         self.assertTrue(verdict(ticket, [self.parent, blocker])["dispatchable"])
 
+    def test_section_heading_names_match_exactly(self):
+        extra_text = self.ticket | {"body": "### Parent feature notes\n#1\n### Blocked by\nNone"}
+        exact_name = self.ticket | {"body": "### Parent feature\n#1\n### Blocked by\nNone"}
+        exact_parent = self.ticket | {"body": "### Parent\n#1\n### Blocked by\nNone"}
+        self.assertFalse(verdict(extra_text, [self.parent])["dispatchable"])
+        self.assertTrue(verdict(exact_name, [self.parent])["dispatchable"])
+        self.assertTrue(verdict(exact_parent, [self.parent])["dispatchable"])
+
     def test_missing_malformed_and_missing_issue_parents_fail_closed(self):
         for body, known in (("Blocked by: None", [self.parent]),
                             ("Parent: nope\nBlocked by: None", [self.parent]),
@@ -76,6 +84,30 @@ class FrontierTests(unittest.TestCase):
     def test_leading_parent_malformed_value_fails_closed(self):
         self.assert_parent_ineligible("Parent: nope\nBlocked by: None")
 
+    def test_missing_blocker_field_fails_closed(self):
+        result = verdict(self.ticket | {"body": "Parent: #1"}, [self.parent])
+        self.assertFalse(result["dispatchable"])
+        self.assertTrue(any("blocker" in reason.casefold() for reason in result["reasons"]))
+
+    def test_duplicate_leading_fields_fail_closed(self):
+        cases = (
+            ("Parent: #1\nParent: #1\nBlocked by: None", "parent"),
+            ("Parent: #1\nBlocked by: None\nBlocked by: #99", "blocker"),
+        )
+        for body, relationship in cases:
+            with self.subTest(relationship=relationship):
+                result = verdict(self.ticket | {"body": body}, [self.parent])
+                self.assertFalse(result["dispatchable"])
+                self.assertTrue(any(relationship in reason.casefold() for reason in result["reasons"]))
+
+    def test_duplicate_section_headings_fail_closed(self):
+        ticket = self.ticket | {
+            "body": "### Parent feature\n#1\n### Parent\n#1\n### Blocked by\nNone"
+        }
+        result = verdict(ticket, [self.parent])
+        self.assertFalse(result["dispatchable"])
+        self.assertTrue(any("parent" in reason.casefold() for reason in result["reasons"]))
+
     def test_parent_type_approval_wayfinder_and_human(self):
         for parent in (issue(1, labels=["factory:type:decision"]),
                        issue(1, labels=["factory:type:feature"]),
@@ -94,8 +126,12 @@ class FrontierTests(unittest.TestCase):
         self.assertFalse(verdict(ticket, [self.parent, native_open])["dispatchable"])
 
     def test_native_parent_decision_and_stale_claim(self):
-        ticket = self.ticket | {"body": "", "parent": 1}
+        ticket = self.ticket | {"body": "Blocked by: None", "parent": 1}
         self.assertTrue(verdict(ticket, [self.parent])["dispatchable"])
+        native_only = self.ticket | {
+            "body": "", "parent": {"number": 1}, "blockedBy": {"nodes": [{"number": 4}]}
+        }
+        self.assertTrue(verdict(native_only, [self.parent, issue(4, state="CLOSED")])["dispatchable"])
         decision = issue(3, "Parent: #1", ["factory:type:decision"])
         self.assertFalse(verdict(self.ticket, [self.parent, decision])["dispatchable"])
         stale = self.ticket | {"comments": ["<!-- factory-claim issue=2 session=x -->"]}
@@ -177,7 +213,7 @@ class FrontierTests(unittest.TestCase):
         result, = json.loads(output.getvalue())
         self.assertEqual(result["url"], target["url"])
         self.assertEqual(result["title"], target["title"])
-        self.assertIn("title,url", calls[0][-1])
+        self.assertEqual(calls[0][-1], frontier["ISSUE_FIELDS"])
 
     def test_gate_exit_codes_and_infrastructure_failure(self):
         namespace = main.__globals__

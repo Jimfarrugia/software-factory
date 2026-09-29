@@ -8,6 +8,7 @@ import sys
 
 ACTIVE = {"factory:needs-triage", "factory:needs-spec", "factory:ready", "factory:human",
           "factory:running", "factory:blocked", "factory:review", "factory:wontfix"}
+ISSUE_FIELDS = "number,title,url,body,labels,state,blockedBy,parent,comments"
 
 
 def labels(issue):
@@ -21,6 +22,7 @@ def references(text):
 def field_text(body, name):
     lines = (body or "").splitlines()
     field_pattern = re.compile(r"^(Parent|Blocked by):(.*)$", re.IGNORECASE)
+    flat_values = []
     for line in lines:
         if not line.strip():
             continue
@@ -28,22 +30,27 @@ def field_text(body, name):
         if field is None:
             break
         if field.group(1).casefold() == name.casefold():
-            return field.group(2).strip()
+            flat_values.append(field.group(2).strip())
+    if flat_values:
+        return (flat_values[0], False) if len(flat_values) == 1 else (None, True)
 
     heading_pattern = re.compile(r"^(#{1,6})[ \t]+(.*)$")
+    sections = []
     for index, line in enumerate(lines):
         heading = heading_pattern.match(line)
         if heading is None:
             continue
-        title = heading.group(2).strip().rstrip("#").strip().casefold()
+        title = heading.group(2).strip().strip("#").strip().casefold()
         matches = title == name.casefold()
         if name.casefold() == "parent":
-            matches = title == "parent" or title.startswith("parent feature")
+            matches = title in {"parent", "parent feature"}
         if matches:
             end = next((position for position in range(index + 1, len(lines))
                         if heading_pattern.match(lines[position])), len(lines))
-            return "\n".join(lines[index + 1:end]).strip()
-    return None
+            sections.append("\n".join(lines[index + 1:end]).strip())
+    if sections:
+        return (sections[0], False) if len(sections) == 1 else (None, True)
+    return None, False
 
 
 def parse_relationship(issue, key, field):
@@ -58,9 +65,11 @@ def parse_relationship(issue, key, field):
         native_ids = set()
     if key == "parent" and native is not None:
         native_ids = {int(native.get("number", native) if isinstance(native, dict) else native)}
-    text = field_text(issue.get("body", ""), field)
+    text, duplicate = field_text(issue.get("body", ""), field)
+    if duplicate:
+        return native_ids, True
     if text is None:
-        return native_ids, key == "parent" and not native_ids
+        return native_ids, not native_ids
     if key == "blocked_by" and text.strip().casefold() == "none":
         return native_ids, False
     refs = references(text)
@@ -157,7 +166,7 @@ def gh(*args):
 
 def fetch():
     listing = json.loads(gh("issue", "list", "--state", "open", "--limit", "1000",
-                            "--json", "number,title,url,body,labels,state,blockedBy,parent,comments"))
+                            "--json", ISSUE_FIELDS))
     return listing
 
 
@@ -168,7 +177,7 @@ def enrich(issue, issues):
     by_number = {int(item["number"]): item for item in issues}
     for number in sorted((parent_refs | blocker_refs) - by_number.keys()):
         try:
-            related = json.loads(gh("issue", "view", str(number), "--json", "number,title,url,body,labels,state,blockedBy,parent,comments"))
+            related = json.loads(gh("issue", "view", str(number), "--json", ISSUE_FIELDS))
         except subprocess.CalledProcessError as error:
             if "not found" in (error.stderr or "").casefold() or "could not resolve to an issue" in (error.stderr or "").casefold():
                 continue
@@ -195,7 +204,7 @@ def main(argv=None):
         if args.check is not None:
             target = next((item for item in issues if item["number"] == args.check), None)
             if target is None:
-                target = json.loads(gh("issue", "view", str(args.check), "--json", "number,title,url,body,labels,state"))
+                target = json.loads(gh("issue", "view", str(args.check), "--json", ISSUE_FIELDS))
                 target["comments"] = []
             result = evaluate(target, issues)
             print("dispatchable" if result["dispatchable"] else "ineligible: " + "; ".join(result["reasons"]))
@@ -209,7 +218,7 @@ def main(argv=None):
             for number in args.issues:
                 item = next((candidate for candidate in issues if candidate["number"] == number), None)
                 if item is None:
-                    item = json.loads(gh("issue", "view", str(number), "--json", "number,title,url,body,labels,state"))
+                    item = json.loads(gh("issue", "view", str(number), "--json", ISSUE_FIELDS))
                     issues.append(item)
                 selected.append(item)
         else:

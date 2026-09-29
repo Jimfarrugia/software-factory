@@ -14,16 +14,19 @@ Move an issue with an open PR to `factory:review`. Return an abandoned claim to
 
 ## Select the frontier
 
-An issue is dispatchable only when all are true:
+For each candidate, run `scripts/factory-frontier --check <n>`. Dispatch only
+when it exits `0`; any non-zero exit means no worker is claimed. The command
+only reports and never changes GitHub labels; the coordinator performs every
+label write.
 
-- open and labelled `factory:type:implementation` and `factory:ready`;
-- linked to a parent feature labelled `factory:spec-approved`;
-- all blocking issues are closed;
-- no unresolved human decision remains;
-- it does not overlap a running worker's likely files, schema, migration, or API.
+Exit `1` means the ticket was evaluated and is ineligible. Use the printed
+reason and state-label hint to route it; do not re-read it to repeat the gate.
+Exit `2` means eligibility could not be evaluated: fix the tooling, not the
+ticket. The command's eligibility verdict does not assess whether the ticket's
+likely files, schema, migration, or API surface overlaps a running worker; check
+that manually before claiming.
 
-Never dispatch a `factory:type:decision`, `wayfinder:map`, or
-`wayfinder:*` issue. Keep no more than two writing workers active.
+Keep no more than two writing workers active.
 
 ## Claim and isolate
 

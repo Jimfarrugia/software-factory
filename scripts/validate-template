@@ -94,6 +94,7 @@ grep -q "^model: ${expected_model}\$" .opencode/agents/reviewer.md
 # which overrides the agent definition; keep the two in step.
 grep -q "model: {providerID: \"openai\", id: \"$model_id\", variant: \"high\"}" scripts/factory-start-worker
 grep -q -- 'scripts/factory-frontier' scripts/factory-status
+grep -q -- 'scripts/factory-frontier --check' .opencode/skills/factory-dispatch/SKILL.md
 git diff --check
 shellcheck scripts/factory-setup scripts/factory-start-worker scripts/factory-status scripts/validate-template
 python3 scripts/test-frontier.py
